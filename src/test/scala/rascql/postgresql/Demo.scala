@@ -21,7 +21,6 @@ import java.nio.charset.Charset
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.stream.FlowMaterializer
-import akka.stream.io.StreamTcp
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import rascql.postgresql.protocol._
@@ -49,11 +48,11 @@ object Demo extends App {
   val login = Flow() { implicit b =>
     val in = UndefinedSource[BackendMessage]
     val out = UndefinedSink[FrontendMessage]
-    val merge = Merge[FrontendMessage]("merge")
+    val merge = Merge[FrontendMessage]
     val auth = Flow[BackendMessage].section(name("authenticator")) {
       _.transform(() => new Authenticator(username, password))
     }
-    val startup = Source.singleton(StartupMessage(
+    val startup = Source.single(StartupMessage(
       user = username,
       parameters = Map(
         "database" -> username,
@@ -74,7 +73,7 @@ object Demo extends App {
   ).map(Query.apply))
 
   val flow = Flow() { implicit b =>
-    val concat = Concat[FrontendMessage]("concat")
+    val concat = Concat[FrontendMessage]
     val backend = UndefinedSource[BackendMessage]
     val frontend = UndefinedSink[FrontendMessage]
 
@@ -92,12 +91,12 @@ object Demo extends App {
     val encoder = Flow[FrontendMessage].section(name("encoder")) {
       _.map(_.encode(charset))
     }
-    val bcastIn = Broadcast[BackendMessage]("in")
-    val concat = Concat[FrontendMessage]("concat")
-    val bcastOut = Broadcast[FrontendMessage]("out")
+    val bcastIn = Broadcast[BackendMessage](name("in"))
+    val concat = Concat[FrontendMessage]
+    val bcastOut = Broadcast[FrontendMessage](name("out"))
     val inbound = UndefinedSource[ByteString]
     val outbound = UndefinedSink[ByteString]
-    val disconnect = Source.singleton(Terminate)
+    val disconnect = Source.single(Terminate)
 
     inbound ~> decoder ~> bcastIn ~> flow ~> concat.first
     disconnect ~> concat.second
