@@ -23,46 +23,40 @@ import rascql.postgresql.protocol._
 import scala.util.control.NonFatal
 
 /**
- * Decodes one or more messages from a stream.
+ * Decodes one or more [[BackendMessage]]s from a [[ByteString]].
  *
  * @author Philip L. McMahon
  */
-class MessageDecoder(c: Charset, maxLength: Int) extends PushPullStage[ByteString, BackendMessage] {
+class MessageDecoder(c: Charset, maxLength: Int) extends StatefulStage[ByteString, BackendMessage] {
 
-  var decoded = Vector.empty[BackendMessage]
-  var remainder = ByteString.empty
+  def initial = new StageState[ByteString, BackendMessage] {
 
-  def onPush(b: ByteString, ctx: Context[BackendMessage]) = {
-    try {
-      val iter = remainder.concat(b).iterator
-      while (iter.hasNext) {
-        val code = iter.getByte
-        val msgLength = iter.getInt
-        val contentLength = msgLength - 4 // Minus 4 bytes for int
-        if (contentLength > maxLength) {
-          throw new MessageTooLongException(code, contentLength, maxLength)
-        } else if (iter.len >= contentLength) {
-          // Consume fixed number of bytes from iterator as sub-iterator
-          decoded :+= BackendMessage.decode(code, c, iter.getBytes(contentLength))
-        } else {
-          // Need more data for this message
-          // Free bytes which have already been decoded and consume iterator
-          remainder = iter.toByteString.compact
+      var buffered = ByteString.empty
+
+      override def onPush(b: ByteString, ctx: Context[BackendMessage]): Directive =
+        try {
+          var decoded = Vector.empty[BackendMessage]
+          val iter = buffered.concat(b).iterator
+          while (iter.hasNext) {
+            val code = iter.getByte
+            val msgLength = iter.getInt
+            val contentLength = msgLength - 4 // Minus 4 bytes for int
+            if (contentLength > maxLength) {
+              throw new MessageTooLongException(code, contentLength, maxLength)
+            } else if (iter.len >= contentLength) {
+              // Consume fixed number of bytes from iterator as sub-iterator
+              decoded :+= BackendMessage.decode(code, c, iter.getBytes(contentLength))
+            } else {
+              // Need more data for this message
+              // Free bytes which have already been decoded and consume iterator
+              buffered = iter.toByteString.compact
+            }
+          }
+          if (decoded.nonEmpty) emit(decoded.iterator, ctx)
+          else ctx.pull() // Need more data
+        } catch {
+          case NonFatal(e) => ctx.fail(e)
         }
-      }
-      onPull(ctx)
-    } catch {
-      case NonFatal(e) => ctx.fail(e)
     }
-  }
-
-  // Push first decoded message, if any
-  def onPull(ctx: Context[BackendMessage]) = decoded match {
-    case first +: rest =>
-      decoded = rest
-      ctx.push(first)
-    case _ =>
-      ctx.pull()
-  }
 
 }
