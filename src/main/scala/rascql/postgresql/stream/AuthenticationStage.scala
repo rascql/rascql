@@ -24,7 +24,7 @@ import rascql.postgresql.protocol._
  *
  * @author Philip L. McMahon
  */
-class Authenticator(username: String, password: String) extends PushStage[BackendMessage, FrontendMessage] {
+class AuthenticationStage(username: String, password: String) extends PushStage[BackendMessage, FrontendMessage] {
 
   def onPush(msg: BackendMessage, ctx: Context[FrontendMessage]) = msg match {
     case AuthenticationOk =>

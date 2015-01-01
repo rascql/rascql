@@ -19,16 +19,17 @@ package rascql.postgresql
 import java.nio.ByteOrder
 import java.nio.charset.Charset
 import java.security.MessageDigest
-import akka.util.{ByteString, ByteStringBuilder, ByteIterator}
 import scala.annotation.switch
+import scala.util.Try
+import akka.util._
 
 package object protocol {
 
-  private[postgresql] implicit val order = ByteOrder.BIG_ENDIAN
+  private[protocol] implicit val order = ByteOrder.BIG_ENDIAN
 
   private[protocol] val NUL = 0x0.toByte
 
-  private[postgresql] implicit class RichByteIterator(val b: ByteIterator) extends AnyVal {
+  private[protocol] implicit class RichByteIterator(val b: ByteIterator) extends AnyVal {
 
     def getCString(c: Charset): String = {
       val iter = b.clone
@@ -47,7 +48,7 @@ package object protocol {
 
   }
 
-  private[postgresql] implicit class RichByteStringBuilder(val b: ByteStringBuilder) extends AnyVal {
+  private[protocol] implicit class RichByteStringBuilder(val b: ByteStringBuilder) extends AnyVal {
 
     @inline def putCString(content: String, charset: Charset): ByteStringBuilder =
       b.putBytes(content.getBytes(charset)).putNUL
@@ -103,34 +104,54 @@ package protocol {
 
     }
 
-    def decode(code: Byte, c: Charset, b: ByteIterator): BackendMessage = {
-      val decoder = (code: @switch) match {
-        case 'R' => AuthenticationRequest
-        case 'K' => BackendKeyData
-        case '2' => BindComplete
-        case '3' => CloseComplete
-        case 'C' => CommandComplete
-        case 'd' => CopyData
-        case 'c' => CopyDone
-        case 'G' => CopyInResponse
-        case 'H' => CopyOutResponse
-        case 'W' => CopyBothResponse
-        case 'D' => DataRow
-        case 'I' => EmptyQueryResponse
-        case 'E' => ErrorResponse
-        case 'V' => FunctionCallResponse
-        case 'n' => NoData
-        case 'N' => NoticeResponse
-        case 'A' => NotificationResponse
-        case 't' => ParameterDescription
-        case 'S' => ParameterStatus
-        case '1' => ParseComplete
-        case 's' => PortalSuspended
-        case 'Z' => ReadyForQuery
-        case 'T' => RowDescription
-        case _ => throw new UnsupportedMessageTypeException(code)
+    def decodeAll(c: Charset, maxLen: Int, bytes: ByteString): Try[(Seq[BackendMessage], ByteString)] = {
+      Try {
+        var decoded = Vector.empty[BackendMessage]
+        var remaining = ByteString.empty
+        val iter = bytes.iterator
+        while (iter.hasNext) {
+          val code = iter.getByte
+          val msgLength = iter.getInt
+          val contentLength = msgLength - 4 // Minus 4 bytes for int
+          if (contentLength > maxLen) {
+            throw new MessageTooLongException(code, contentLength, maxLen)
+          } else if (iter.len >= contentLength) {
+            val decoder = (code: @switch) match {
+              case 'R' => AuthenticationRequest
+              case 'K' => BackendKeyData
+              case '2' => BindComplete
+              case '3' => CloseComplete
+              case 'C' => CommandComplete
+              case 'd' => CopyData
+              case 'c' => CopyDone
+              case 'G' => CopyInResponse
+              case 'H' => CopyOutResponse
+              case 'W' => CopyBothResponse
+              case 'D' => DataRow
+              case 'I' => EmptyQueryResponse
+              case 'E' => ErrorResponse
+              case 'V' => FunctionCallResponse
+              case 'n' => NoData
+              case 'N' => NoticeResponse
+              case 'A' => NotificationResponse
+              case 't' => ParameterDescription
+              case 'S' => ParameterStatus
+              case '1' => ParseComplete
+              case 's' => PortalSuspended
+              case 'Z' => ReadyForQuery
+              case 'T' => RowDescription
+              case _ => throw new UnsupportedMessageTypeException(code)
+            }
+            // Consume fixed number of bytes from iterator as sub-iterator
+            decoded :+= decoder.decode(c, iter.getBytes(contentLength))
+          } else {
+            // Need more data for this message
+            // Free bytes which have already been decoded and consume iterator
+            remaining = iter.toByteString
+          }
+        }
+        decoded -> remaining
       }
-      decoder.decode(c, b)
     }
 
 

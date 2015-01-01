@@ -50,7 +50,7 @@ object Demo extends App {
     val out = UndefinedSink[FrontendMessage]
     val merge = Merge[FrontendMessage]
     val auth = Flow[BackendMessage].section(name("authenticator")) {
-      _.transform(() => new Authenticator(username, password))
+      _.transform(() => new AuthenticationStage(username, password))
     }
     val startup = Source.single(StartupMessage(
       user = username,
@@ -86,7 +86,7 @@ object Demo extends App {
 
   val codec = Flow() { implicit b =>
     val decoder = Flow[ByteString].section(name("decoder")) {
-      _.transform(() => new MessageDecoder(charset, maxLength))
+      _.transform(() => new DecoderStage(charset, maxLength))
     }
     val encoder = Flow[FrontendMessage].section(name("encoder")) {
       _.map(_.encode(charset))
