@@ -20,10 +20,13 @@ import java.nio.ByteOrder
 import java.nio.charset.Charset
 import java.security.MessageDigest
 import scala.annotation.switch
+import scala.collection.immutable
 import scala.util.Try
 import akka.util._
 
 package object protocol {
+
+  type OID = Int
 
   private[protocol] implicit val order = ByteOrder.BIG_ENDIAN
 
@@ -39,11 +42,10 @@ package object protocol {
     }
 
     // Since take/slice both truncate the iterator and we want to return a sub-iterator for a given range, we do this instead.
-    def getBytes(n: Int): ByteIterator = {
+    def nextBytes(n: Int): ByteIterator = {
       val iter = b.clone
-      iter.take(n)
       b.drop(n)
-      iter
+      iter.take(n)
     }
 
   }
@@ -55,6 +57,32 @@ package object protocol {
 
     @inline def putNUL: ByteStringBuilder = b.putByte(NUL)
 
+    def prependLength: ByteStringBuilder =
+      ByteString.newBuilder.
+        putInt(b.length + 4). // Include length of int
+        append(b.result)
+
+  }
+
+  private[protocol] implicit class RichByteString(val b: ByteString) extends AnyVal {
+
+    def prependLength: ByteString =
+      ByteString.newBuilder.putInt(b.length).append(b).result
+
+  }
+
+  private[protocol] implicit class RichOptionOfFieldFormats(val f: Option[FieldFormats]) extends AnyVal {
+    def encoded: ByteString = f.fold(FieldFormats.Default)(_.encoded)
+  }
+
+  private[protocol] implicit class RichSeqOfParameter(val p: Seq[Parameter]) extends AnyVal {
+    def encoded: ByteString =
+      ByteString.newBuilder.
+        putShort(p.size).
+        putShorts(p.map(_.format.toShort).toArray).
+        putShort(p.size).
+        append(p.foldLeft(ByteString.empty)(_ ++ _.value.fold(Parameter.NULL)(_.prependLength))).
+        result
   }
 
 }
@@ -69,7 +97,7 @@ package protocol {
 
   object FrontendMessage {
 
-    private[protocol] sealed abstract class Empty(typ: Byte) extends FrontendMessage {
+    sealed abstract class Empty(typ: Byte) extends FrontendMessage {
 
       private val data = ByteString.newBuilder.putByte(typ).putInt(4).result
 
@@ -77,7 +105,7 @@ package protocol {
 
     }
 
-    private[protocol] sealed abstract class NonEmpty(typ: Byte) extends FrontendMessage {
+    sealed abstract class NonEmpty(typ: Byte) extends FrontendMessage {
 
       final def encode(c: Charset) = {
         val content = encodeContent(c)
@@ -98,13 +126,13 @@ package protocol {
 
   object BackendMessage {
 
-    private[protocol] trait Empty extends BackendMessage with Decoder {
+    trait Empty extends BackendMessage with Decoder {
 
       def decode(c: Charset, b: ByteIterator) = this
 
     }
 
-    def decodeAll(c: Charset, maxLen: Int, bytes: ByteString): Try[(Seq[BackendMessage], ByteString)] = {
+    def decodeAll(c: Charset, maxLen: Int, bytes: ByteString): Try[(immutable.Seq[BackendMessage], ByteString)] = {
       Try {
         var decoded = Vector.empty[BackendMessage]
         var remaining = ByteString.empty
@@ -143,11 +171,11 @@ package protocol {
               case _ => throw new UnsupportedMessageTypeException(code)
             }
             // Consume fixed number of bytes from iterator as sub-iterator
-            decoded :+= decoder.decode(c, iter.getBytes(contentLength))
+            decoded :+= decoder.decode(c, iter.nextBytes(contentLength))
           } else {
             // Need more data for this message
             // Free bytes which have already been decoded and consume iterator
-            remaining = iter.toByteString
+            remaining = iter.toByteString // TODO compact?
           }
         }
         decoded -> remaining
@@ -159,7 +187,7 @@ package protocol {
 
   sealed abstract class AuthenticationRequest extends BackendMessage
 
-  private[protocol] object AuthenticationRequest extends Decoder {
+  object AuthenticationRequest extends Decoder {
 
     def decode(c: Charset, b: ByteIterator) = {
       (b.getInt: @switch) match {
@@ -195,38 +223,18 @@ package protocol {
 
   }
 
-  case class Bind(destination: Portal,
-                  source: PreparedStatement,
-                  parameters: Seq[ByteString],
-                  paramFormats: Option[FieldFormats] = None,
+  case class Bind(parameters: Seq[Parameter],
+                  destination: Portal = Portal.Unnamed,
+                  source: PreparedStatement = PreparedStatement.Unnamed,
                   resultFormats: Option[FieldFormats] = None) extends FrontendMessage.NonEmpty('B') {
 
-    protected def encodeContent(c: Charset) = {
-      val b = ByteString.newBuilder.
+    protected def encodeContent(c: Charset) =
+      ByteString.newBuilder.
         putCString(destination.name, c).
-        putCString(source.name, c)
-      encodeFormat(paramFormats, b)
-      b.putShort(parameters.size)
-      parameters.foreach { p =>
-        b.putInt(p.length)
-        b.append(p)
-      }
-      encodeFormat(resultFormats, b)
-      b.result
-    }
-
-    private def encodeFormat(f: Option[FieldFormats], b: ByteStringBuilder): Unit = {
-      f match {
-        case Some(FieldFormats.Matched(typ, _)) =>
-          b.putShort(1).
-            putByte(typ.encoded)
-        case Some(FieldFormats.Mixed(types)) =>
-          b.putShort(types.size)
-          types.foreach(t => b.putShort(t.encoded))
-        case None =>
-          b.putShort(0)
-      }
-    }
+        putCString(source.name, c).
+        append(parameters.encoded).
+        append(resultFormats.encoded).
+        result
 
   }
 
@@ -262,16 +270,16 @@ package protocol {
     def decode(c: Charset, b: ByteIterator) = {
       val raw = b.getCString(c)
       val (Array(name), args) = raw.split(" ").splitAt(1)
-      val tag = (name -> args.map(_.toInt).toSeq) match {
-        case ("INSERT", Seq(oid, rows)) =>
+      val tag = (name -> args.map(_.toInt)) match {
+        case ("INSERT", Array(oid, rows)) =>
           // TODO Verify large unsigned OID parses properly
           Insert(oid, rows)
-        case ("DELETE", Seq(rows)) => Delete(rows.toInt)
-        case ("UPDATE", Seq(rows)) => Update(rows.toInt)
-        case ("SELECT", Seq(rows)) => Select(rows.toInt)
-        case ("MOVE", Seq(rows)) => Move(rows.toInt)
-        case ("FETCH", Seq(rows)) => Fetch(rows.toInt)
-        case ("COPY", Seq(rows)) => Copy(Some(rows.toInt)) // 8.2 and later
+        case ("DELETE", Array(rows)) => Delete(rows.toInt)
+        case ("UPDATE", Array(rows)) => Update(rows.toInt)
+        case ("SELECT", Array(rows)) => Select(rows.toInt)
+        case ("MOVE", Array(rows)) => Move(rows.toInt)
+        case ("FETCH", Array(rows)) => Fetch(rows.toInt)
+        case ("COPY", Array(rows)) => Copy(Some(rows.toInt)) // 8.2 and later
         case ("COPY", _) => Copy(None) // Pre-8.2
         case ("BEGIN", _) => Begin
         case ("ROLLBACK", _) => Rollback
@@ -295,7 +303,7 @@ package protocol {
   object CopyData extends Decoder {
 
     def decode(c: Charset, b: ByteIterator) =
-      CopyData(b.toByteString.compact) // TODO Should this call compact?
+      CopyData(b.toByteString) // TODO compact?
 
   }
 
@@ -316,7 +324,7 @@ package protocol {
 
   }
 
-  private[protocol] abstract class CopyResponseDecoder(typ: Byte) extends Decoder {
+  sealed abstract class CopyResponseDecoder(typ: Byte) extends Decoder {
 
     import Format._
     import FieldFormats._
@@ -324,7 +332,7 @@ package protocol {
     def decode(c: Charset, b: ByteIterator) = {
       val format = Format.decode(b.getByte)
       val size = b.getShort
-      val types = IndexedSeq.fill(size)(b.getByte).map(Format.decode(_))
+      val types = Vector.fill(size)(b.getByte).map(Format.decode(_))
       apply(format match {
         case Text =>
           // All columns must have format text
@@ -358,7 +366,7 @@ package protocol {
 
   object CopyBothResponse extends CopyResponseDecoder('W')
 
-  case class DataRow(values: IndexedSeq[Option[ByteString]]) extends BackendMessage
+  case class DataRow(values: immutable.IndexedSeq[Option[ByteString]]) extends BackendMessage
 
   object DataRow extends Decoder {
 
@@ -366,7 +374,7 @@ package protocol {
       DataRow((0 until b.getShort) map { _ =>
         Option(b.getInt).
           filterNot(_ < 0).
-          map(b.getBytes(_).toByteString)
+          map(b.nextBytes(_).toByteString) // TODO compact?
       })
 
   }
@@ -379,7 +387,7 @@ package protocol {
 
   case object EmptyQueryResponse extends BackendMessage.Empty
 
-  case class ErrorResponse(fields: Seq[Field]) extends BackendMessage
+  case class ErrorResponse(fields: immutable.Seq[Field]) extends BackendMessage
 
   object ErrorResponse extends Decoder {
 
@@ -400,34 +408,16 @@ package protocol {
 
   case object Flush extends FrontendMessage.Empty('H')
 
-  // FIXME Duplicates code in Bind encoder
-  case class FunctionCall(target: Int, arguments: Seq[ByteString], argFormats: Option[FieldFormats], result: Format) extends FrontendMessage.NonEmpty('F') {
+  case class FunctionCall(target: Int,
+                          arguments: Seq[Parameter],
+                          result: Format) extends FrontendMessage.NonEmpty('F') {
 
-    protected def encodeContent(c: Charset) = {
-      val b = ByteString.newBuilder.
-        putInt(target)
-      encodeFormat(argFormats, b)
-      b.putShort(arguments.size)
-      arguments.foreach { p =>
-        b.putInt(p.length)
-        b.append(p)
-      }
-      b.putByte(result.encoded).
+    protected def encodeContent(c: Charset) =
+      ByteString.newBuilder.
+        putInt(target).
+        append(arguments.encoded).
+        putShort(result.toShort).
         result
-    }
-
-    private def encodeFormat(f: Option[FieldFormats], b: ByteStringBuilder): Unit = {
-      f match {
-        case Some(FieldFormats.Matched(typ, _)) =>
-          b.putShort(1).
-            putByte(typ.encoded)
-        case Some(FieldFormats.Mixed(types)) =>
-          b.putShort(types.size)
-          types.foreach(t => b.putShort(t.encoded))
-        case None =>
-          b.putShort(0)
-      }
-    }
 
   }
 
@@ -439,14 +429,14 @@ package protocol {
       FunctionCallResponse(
         Option(b.getInt).
           filter(_ > 0).
-          map(b.getBytes(_).toByteString.compact)
+          map(b.nextBytes(_).toByteString) // TODO compact?
       )
 
   }
 
   case object NoData extends BackendMessage.Empty
 
-  case class NoticeResponse(fields: Seq[Field]) extends BackendMessage
+  case class NoticeResponse(fields: immutable.Seq[Field]) extends BackendMessage
 
   object NoticeResponse extends Decoder {
 
@@ -464,12 +454,12 @@ package protocol {
 
   }
 
-  case class ParameterDescription(types: IndexedSeq[Int]) extends BackendMessage
+  case class ParameterDescription(types: immutable.IndexedSeq[OID]) extends BackendMessage
 
   object ParameterDescription extends Decoder {
 
     def decode(c: Charset, b: ByteIterator) =
-      ParameterDescription(IndexedSeq.fill(b.getShort)(b.getInt))
+      ParameterDescription(Vector.fill(b.getShort)(b.getInt))
 
   }
 
@@ -482,16 +472,17 @@ package protocol {
 
   }
 
-  case class Parse(query: String, destination: PreparedStatement, types: Seq[Int] = Seq.empty) extends FrontendMessage.NonEmpty('P') {
+  case class Parse(query: String,
+                   types: Seq[OID] = Nil,
+                   destination: PreparedStatement = PreparedStatement.Unnamed) extends FrontendMessage.NonEmpty('P') {
 
-    protected def encodeContent(c: Charset) = {
-      val b = ByteString.newBuilder.
+    protected def encodeContent(c: Charset) =
+      ByteString.newBuilder.
         putCString(destination.name, c).
         putCString(query, c).
-        putShort(types.size)
-      types.foreach(b.putInt(_))
-      b.result
-    }
+        putShort(types.size).
+        putInts(types.toArray).
+        result
 
   }
 
@@ -532,7 +523,7 @@ package protocol {
 
   }
 
-  case class RowDescription(fields: IndexedSeq[RowDescription.Field]) extends BackendMessage
+  case class RowDescription(fields: immutable.IndexedSeq[RowDescription.Field]) extends BackendMessage
 
   object RowDescription extends Decoder {
 
@@ -595,26 +586,21 @@ package protocol {
 
   case class StartupMessage(user: String, parameters: Map[String, String]) extends FrontendMessage {
 
-    val userParam = "user"
+    private val userParam = "user"
 
-    def encode(c: Charset) = {
-      val b = ByteString.newBuilder.
-        putInt(196608). // version 3.0
-        putCString("user", c).
-        putCString(user, c)
-      parameters.
-        filterKeys(_ != userParam).
-        foreach {
-        case (k, v) =>
-          b.putCString(k, c).
-            putCString(v, c)
-      }
-      b.putNUL
+    def encode(c: Charset) =
       ByteString.newBuilder.
-        putInt(b.length + 4).
-        append(b.result).
+        putInt(196608). // version 3.0
+        putCString(userParam, c).
+        putCString(user, c).
+        append(parameters.filterKeys(_ != userParam).foldLeft(ByteString.newBuilder) {
+          case (b, (k, v)) =>
+            b.putCString(k, c).
+              putCString(v, c)
+        }.result).
+        putNUL.
+        prependLength.
         result
-    }
 
   }
 
@@ -622,9 +608,19 @@ package protocol {
 
   case object Terminate extends FrontendMessage.Empty('X')
 
-  private[protocol] trait Decoder {
+  trait Decoder {
 
     def decode(c: Charset, b: ByteIterator): BackendMessage
+
+  }
+
+  case class Parameter(value: Option[ByteString], format: Format)
+
+  object Parameter {
+
+    private[protocol] val NULL = ByteString.newBuilder.putInt(-1).result
+
+    def apply(value: ByteString, format: Format): Parameter = Parameter(Option(value), format)
 
   }
 
@@ -632,7 +628,8 @@ package protocol {
 
   object CommandTag {
 
-    case class Insert(oid: Int, rows: Int) extends CommandTag // FIXME oid is an unsigned int
+    // FIXME Should the rows count be a long?
+    case class Insert(oid: OID, rows: Int) extends CommandTag // FIXME oid is an unsigned int
     case class Delete(rows: Int) extends CommandTag
     case class Update(rows: Int) extends CommandTag
     case class Select(rows: Int) extends CommandTag
@@ -697,7 +694,13 @@ package protocol {
 
   }
 
-  sealed abstract class Format(val encoded: Byte)
+  sealed abstract class Format(typ: Byte) {
+
+    def toShort = typ.toShort
+
+    def toByte = typ
+
+  }
 
   object Format {
 
@@ -714,21 +717,30 @@ package protocol {
 
   sealed trait FieldFormats {
 
+    def encoded: ByteString
+
     def apply(index: Short): Format
 
   }
 
   object FieldFormats {
 
+    private[protocol] val Default = ByteString.newBuilder.putShort(0).result
+
     case class Matched(format: Format, count: Short) extends FieldFormats {
       def apply(index: Short) =
         if (index < count) format
         else throw new IndexOutOfBoundsException
+      def encoded = ByteString.newBuilder.putShort(1).putShort(format.toShort).result
     }
 
-    case class Mixed(types: IndexedSeq[Format]) extends FieldFormats {
+    case class Mixed(types: immutable.IndexedSeq[Format]) extends FieldFormats {
       def apply(index: Short) = types(index)
+      def encoded = ByteString.newBuilder.putShort(types.size).putShorts(types.map(_.toShort).toArray).result
     }
+
+    // TODO Try to detect if Matched can be used
+    def apply(types: Iterable[Format]): FieldFormats = Mixed(types.toVector)
 
   }
 
@@ -772,7 +784,7 @@ package protocol {
       private val hexBytes = (('0' to '9') ++ ('a' to 'f')).map(_.toByte)
 
       // This isn't very efficient, but it's only used during login
-      implicit class RichArray(val a: Array[Byte]) extends AnyVal {
+      private implicit class RichArray(val a: Array[Byte]) extends AnyVal {
         def toHex: Array[Byte] = a.map(_ & 0xff).flatMap { c =>
           Array(c >> 4, c & 0xf).map(hexBytes.apply)
         }
@@ -781,8 +793,6 @@ package protocol {
     }
 
   }
-
-
 
   // TODO Make this an inner class of ReadyForQuery object?
   sealed trait TransactionStatus
@@ -807,7 +817,7 @@ package protocol {
     case class Position(index: Int) extends Field
     case class InternalPosition(index: Int) extends Field
     case class InternalQuery(text: String) extends Field
-    case class Where(trace: Seq[String]) extends Field
+    case class Where(trace: immutable.IndexedSeq[String]) extends Field
     case class Schema(name: String) extends Field
     case class Table(name: String) extends Field
     case class Column(name: String) extends Field
@@ -823,7 +833,7 @@ package protocol {
 
     import Field._
 
-    def decode(c: Charset, b: ByteIterator): Seq[Field] =
+    def decode(c: Charset, b: ByteIterator): immutable.Seq[Field] =
       Iterator.continually(b.getByte).
         takeWhile(_ != NUL).
         foldLeft(Vector.empty[Field]) { (fields, typ) =>
@@ -837,7 +847,7 @@ package protocol {
             case 'P' => fields :+ Position(value.toInt)
             case 'p' => fields :+ InternalPosition(value.toInt)
             case 'q' => fields :+ InternalQuery(value)
-            case 'W' => fields :+ Where(value.split('\n').toSeq)
+            case 'W' => fields :+ Where(value.split('\n').toVector)
             case 's' => fields :+ Schema(value)
             case 't' => fields :+ Table(value)
             case 'c' => fields :+ Column(value)
@@ -869,7 +879,7 @@ package protocol {
   class UnsupportedFormatTypeException(typ: Short)
     extends DecoderException(s"Format type ${Integer.toHexString(typ)} is not supported")
 
-  class TextOnlyCopyFormatException(columns: Seq[Int])
+  class TextOnlyCopyFormatException(columns: Iterable[Int])
     extends DecoderException(s"Text COPY format does not allow binary column types in columns ${columns.mkString(", ")}")
 
   class UnsupportedTransactionStatusException(typ: Byte)
