@@ -20,7 +20,8 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
-import akka.stream.FlowMaterializer
+import akka.event.Logging
+import akka.stream._
 import akka.stream.scaladsl._
 import akka.util.ByteString
 import rascql.postgresql.protocol._
@@ -36,6 +37,7 @@ object Demo extends App {
   implicit val system = ActorSystem("Example")
   implicit val materializer = FlowMaterializer()
 
+  val log = Logging(system, "rascql-demo")
   val charset = Charset.forName("UTF-8")
   val maxLength = 16 * 1024 * 1024
 
@@ -67,44 +69,59 @@ object Demo extends App {
     in -> out
   }
 
-  val queries = Source[FrontendMessage](List(
-    "BEGIN;SELECT usename FROM pg_stat_activity",
-    "commit"
+  val query = Source.single(List(
+    """BEGIN;
+      |SELECT usename FROM pg_stat_activity;
+      |COMMIT""".stripMargin
   ).map(Query.apply))
 
+  val preparedStatement = Source.single(List(
+    Parse("SELECT usename FROM pg_stat_activity WHERE usename = $1"),
+    Bind(List(Parameter(ByteString(username, charset.name()), Format.Text))),
+    Describe(PreparedStatement.Unnamed),
+    Execute(Portal.Unnamed),
+    Sync
+  ))
+
+  val close = Source.single(List(Terminate))
+
   val flow = Flow() { implicit b =>
-    val concat = Concat[FrontendMessage]
+    val merge = Merge[FrontendMessage]
+    val bcastIn = Broadcast[BackendMessage]
+    val bcastOut = Broadcast[(Source[_], List[FrontendMessage])]
     val backend = UndefinedSource[BackendMessage]
     val frontend = UndefinedSink[FrontendMessage]
+    val rfq = Flow[BackendMessage].section(name("ready-for-query")) {
+      _.splitWhen(_.isInstanceOf[ReadyForQuery])
+    }
+    val zipper = Zip[Source[_], List[FrontendMessage]]
+    val unzipper = Flow[(Source[_], List[FrontendMessage])]
 
-    backend ~> login ~> concat.first
-    queries ~> concat.second
-    concat.out ~> frontend
+    // Zip each query chunk with the ReadyForQuery message, so messages are
+    // sent when the server is ready for them.
+
+    backend ~> bcastIn ~> login ~> merge ~> frontend
+               bcastIn ~> rfq ~> zipper.left
+    query.concat(preparedStatement).concat(close) ~> zipper.right
+    zipper.out ~> bcastOut ~> unzipper.mapConcat(_._2) ~> merge
+                  bcastOut ~> unzipper.map(_._1).flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
 
     backend -> frontend
   }
 
   val codec = Flow() { implicit b =>
     val decoder = Flow[ByteString].section(name("decoder")) {
-      _.transform(() => new DecoderStage(charset, maxLength))
+      _.transform(() => new DecoderStage(charset, maxLength)).
+        transform(() => new LoggingStage("Decoder", log))
     }
     val encoder = Flow[FrontendMessage].section(name("encoder")) {
-      _.map(_.encode(charset))
+      _.transform(() => new LoggingStage("Encoder", log)).
+        map(_.encode(charset))
     }
-    val bcastIn = Broadcast[BackendMessage](name("in"))
-    val concat = Concat[FrontendMessage]
-    val bcastOut = Broadcast[FrontendMessage](name("out"))
     val inbound = UndefinedSource[ByteString]
     val outbound = UndefinedSink[ByteString]
-    val disconnect = Source.single(Terminate)
 
-    inbound ~> decoder ~> bcastIn ~> flow ~> concat.first
-    disconnect ~> concat.second
-    concat.out ~> bcastOut ~> encoder ~> outbound
-    bcastIn ~> Sink.foreach[Any](m => println(s"Inbound received $m"))
-    bcastIn ~> Sink.onComplete(r => println(s"Inbound complete $r"))
-    bcastOut ~> Sink.foreach[Any](m => println(s"Outbound sent $m"))
-    bcastOut ~> Sink.onComplete(r => println(s"Outbound complete $r"))
+    inbound ~> decoder ~> flow ~> encoder ~> outbound
 
     inbound -> outbound
   }
