@@ -32,7 +32,7 @@ import rascql.postgresql.stream._
  *
  * @author Philip L. McMahon
  */
-object Demo extends App {
+object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   implicit val system = ActorSystem("Example")
   implicit val materializer = FlowMaterializer()
@@ -76,8 +76,8 @@ object Demo extends App {
   ).map(Query.apply))
 
   val preparedStatement = Source.single(List(
-    Parse("SELECT usename FROM pg_stat_activity WHERE usename = $1"),
-    Bind(List(Parameter(ByteString(username, charset.name()), Format.Text))),
+    Parse("SELECT usename FROM pg_stat_activity WHERE usename = $1 LIMIT $2"),
+    Bind(Seq(Parameter(username), Parameter(1))),
     Describe(PreparedStatement.Unnamed),
     Execute(Portal.Unnamed),
     Sync

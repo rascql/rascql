@@ -27,6 +27,8 @@ import akka.util._
 package object protocol {
 
   type OID = Int
+  type ProcessID = Int
+  type SecretKey = Int
 
   private[protocol] implicit val order = ByteOrder.BIG_ENDIAN
 
@@ -76,12 +78,12 @@ package object protocol {
   }
 
   private[protocol] implicit class RichSeqOfParameter(val p: Seq[Parameter]) extends AnyVal {
-    def encoded: ByteString =
+    def encode(c: Charset): ByteString =
       ByteString.newBuilder.
         putShort(p.size).
         putShorts(p.map(_.format.toShort).toArray).
         putShort(p.size).
-        append(p.foldLeft(ByteString.empty)(_ ++ _.value.fold(Parameter.NULL)(_.prependLength))).
+        append(p.foldLeft(ByteString.empty)(_ ++ _.encode(c))).
         result
   }
 
@@ -214,7 +216,7 @@ package protocol {
   case class AuthenticationGSSContinue(data: ByteString) extends AuthenticationRequest
   case object AuthenticationSSPI extends AuthenticationRequest
 
-  case class BackendKeyData(processId: Int, secretKey: Int) extends BackendMessage
+  case class BackendKeyData(processId: ProcessID, secretKey: SecretKey) extends BackendMessage
 
   object BackendKeyData extends Decoder {
 
@@ -232,7 +234,7 @@ package protocol {
       ByteString.newBuilder.
         putCString(destination.name, c).
         putCString(source.name, c).
-        append(parameters.encoded).
+        append(parameters.encode(c)).
         append(resultFormats.encoded).
         result
 
@@ -240,7 +242,7 @@ package protocol {
 
   case object BindComplete extends BackendMessage.Empty
 
-  case class CancelRequest(processId: Int, secretKey: Int) extends FrontendMessage {
+  case class CancelRequest(processId: ProcessID, secretKey: SecretKey) extends FrontendMessage {
 
     private val prefix = ByteString.newBuilder.putInt(16).putInt(80877102).result
 
@@ -366,7 +368,7 @@ package protocol {
 
   object CopyBothResponse extends CopyResponseDecoder('W')
 
-  case class DataRow(values: immutable.IndexedSeq[Option[ByteString]]) extends BackendMessage
+  case class DataRow(values: immutable.IndexedSeq[Option[Decodable]]) extends BackendMessage
 
   object DataRow extends Decoder {
 
@@ -374,7 +376,8 @@ package protocol {
       DataRow((0 until b.getShort) map { _ =>
         Option(b.getInt).
           filterNot(_ < 0).
-          map(b.nextBytes(_).toByteString) // TODO compact?
+          map(b.nextBytes(_).toByteString). // TODO compact?
+          map(Decodable(_, c))
       })
 
   }
@@ -408,14 +411,14 @@ package protocol {
 
   case object Flush extends FrontendMessage.Empty('H')
 
-  case class FunctionCall(target: Int,
+  case class FunctionCall(target: OID,
                           arguments: Seq[Parameter],
                           result: Format) extends FrontendMessage.NonEmpty('F') {
 
     protected def encodeContent(c: Charset) =
       ByteString.newBuilder.
         putInt(target).
-        append(arguments.encoded).
+        append(arguments.encode(c)).
         putShort(result.toShort).
         result
 
@@ -528,12 +531,12 @@ package protocol {
   object RowDescription extends Decoder {
 
     case class Field(name: String,
-                     tableOid: Int,
+                     tableOid: OID,
                      column: Int,
                      dataType: DataType,
                      format: Format)
 
-    case class DataType(oid: Int, size: Long, modifier: Int)
+    case class DataType(oid: OID, size: Long, modifier: Int)
 
     def decode(c: Charset, b: ByteIterator) = {
       RowDescription(
@@ -614,13 +617,21 @@ package protocol {
 
   }
 
-  case class Parameter(value: Option[ByteString], format: Format)
+  // Note that the PostgreSQL documentation recommends only encoding parameters
+  // using the text format, since it is portable across versions.
+  case class Parameter(value: Option[Encodable], format: Format = Format.Text) {
+
+    def encode(c: Charset): ByteString =
+      value.fold(Parameter.NULL)(_.encode(c).prependLength)
+
+  }
 
   object Parameter {
 
-    private[protocol] val NULL = ByteString.newBuilder.putInt(-1).result
+    private val NULL = ByteString.newBuilder.putInt(-1).result
 
-    def apply(value: ByteString, format: Format): Parameter = Parameter(Option(value), format)
+    // If value is null, Parameter argument will be None
+    def apply(value: Encodable): Parameter = Parameter(Option(value))
 
   }
 
