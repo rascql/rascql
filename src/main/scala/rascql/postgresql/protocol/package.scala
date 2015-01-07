@@ -390,12 +390,12 @@ package protocol {
 
   case object EmptyQueryResponse extends BackendMessage.Empty
 
-  case class ErrorResponse(fields: immutable.Seq[Field]) extends BackendMessage
+  case class ErrorResponse(fields: immutable.Seq[ErrorResponse.Field]) extends BackendMessage
 
-  object ErrorResponse extends Decoder {
+  object ErrorResponse extends Decoder with ResponseFields {
 
     def decode(c: Charset, b: ByteIterator) =
-      ErrorResponse(Fields.decode(c, b))
+      ErrorResponse(decodeAll(c, b))
 
   }
 
@@ -439,12 +439,12 @@ package protocol {
 
   case object NoData extends BackendMessage.Empty
 
-  case class NoticeResponse(fields: immutable.Seq[Field]) extends BackendMessage
+  case class NoticeResponse(fields: immutable.Seq[NoticeResponse.Field]) extends BackendMessage
 
-  object NoticeResponse extends Decoder {
+  object NoticeResponse extends Decoder with ResponseFields {
 
     def decode(c: Charset, b: ByteIterator) =
-      NoticeResponse(Fields.decode(c, b))
+      NoticeResponse(decodeAll(c, b))
 
   }
 
@@ -816,9 +816,9 @@ package protocol {
 
   }
 
-  sealed trait Field
+  sealed trait ResponseFields {
 
-  object Field {
+    sealed trait Field
 
     case class Severity(level: String) extends Field
     case class SQLState(code: String) extends Field
@@ -838,38 +838,32 @@ package protocol {
     case class Line(index: Int) extends Field
     case class Routine(name: String) extends Field
 
-  }
-
-  object Fields {
-
-    import Field._
-
-    def decode(c: Charset, b: ByteIterator): immutable.Seq[Field] =
+    protected def decodeAll(c: Charset, b: ByteIterator): immutable.Seq[Field] =
       Iterator.continually(b.getByte).
         takeWhile(_ != NUL).
         foldLeft(Vector.empty[Field]) { (fields, typ) =>
-          val value = b.getCString(c)
-          (typ: @switch) match {
-            case 'S' => fields :+ Severity(value)
-            case 'C' => fields :+ SQLState(value)
-            case 'M' => fields :+ Message(value)
-            case 'D' => fields :+ Detail(value)
-            case 'H' => fields :+ Hint(value)
-            case 'P' => fields :+ Position(value.toInt)
-            case 'p' => fields :+ InternalPosition(value.toInt)
-            case 'q' => fields :+ InternalQuery(value)
-            case 'W' => fields :+ Where(value.split('\n').toVector)
-            case 's' => fields :+ Schema(value)
-            case 't' => fields :+ Table(value)
-            case 'c' => fields :+ Column(value)
-            case 'd' => fields :+ DataType(value)
-            case 'n' => fields :+ Constraint(value)
-            case 'F' => fields :+ File(value)
-            case 'L' => fields :+ Line(value.toInt)
-            case 'R' => fields :+ Routine(value)
-            case _ => fields // Ignore, per documentation recommendation
-          }
+        val value = b.getCString(c)
+        (typ: @switch) match {
+          case 'S' => fields :+ Severity(value)
+          case 'C' => fields :+ SQLState(value)
+          case 'M' => fields :+ Message(value)
+          case 'D' => fields :+ Detail(value)
+          case 'H' => fields :+ Hint(value)
+          case 'P' => fields :+ Position(value.toInt)
+          case 'p' => fields :+ InternalPosition(value.toInt)
+          case 'q' => fields :+ InternalQuery(value)
+          case 'W' => fields :+ Where(value.split('\n').toVector)
+          case 's' => fields :+ Schema(value)
+          case 't' => fields :+ Table(value)
+          case 'c' => fields :+ Column(value)
+          case 'd' => fields :+ DataType(value)
+          case 'n' => fields :+ Constraint(value)
+          case 'F' => fields :+ File(value)
+          case 'L' => fields :+ Line(value.toInt)
+          case 'R' => fields :+ Routine(value)
+          case _ => fields // Ignore, per documentation recommendation
         }
+      }
 
   }
 

@@ -25,7 +25,7 @@ package stream {
   class UnsupportedAuthenticationRequestException(request: AuthenticationRequest)
     extends StreamException(s"Authentication request ${request.getClass.getSimpleName} is not supported")
 
-  class AuthenticationFailedException(errors: Seq[Field])
+  class AuthenticationFailedException(errors: Seq[ErrorResponse.Field])
     extends StreamException(s"Authentication failed (${errors.mkString(", ")})")
 
   class UnexpectedBackendMessageException(message: BackendMessage)
