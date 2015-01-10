@@ -37,7 +37,6 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   implicit val system = ActorSystem("Example")
   implicit val materializer = FlowMaterializer()
 
-  val log = Logging(system, "rascql-demo")
   val charset = Charset.forName("UTF-8")
   val maxLength = 16 * 1024 * 1024
 
@@ -52,7 +51,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
     val out = UndefinedSink[FrontendMessage]
     val merge = Merge[FrontendMessage]
     val auth = Flow[BackendMessage].section(name("authenticator")) {
-      _.transform(() => new AuthenticationStage(username, password))
+      _.transform(() => AuthenticationStage(username, password))
     }
     val startup = Source.single(StartupMessage(
       user = username,
@@ -111,11 +110,11 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val codec = Flow() { implicit b =>
     val decoder = Flow[ByteString].section(name("decoder")) {
-      _.transform(() => new DecoderStage(charset, maxLength)).
-        transform(() => new LoggingStage("Decoder", log))
+      _.transform(() => DecoderStage(charset, maxLength)).
+        transform(() => LoggingStage("Decoder"))
     }
     val encoder = Flow[FrontendMessage].section(name("encoder")) {
-      _.transform(() => new LoggingStage("Encoder", log)).
+      _.transform(() => LoggingStage("Encoder")).
         map(_.encode(charset))
     }
     val inbound = UndefinedSource[ByteString]

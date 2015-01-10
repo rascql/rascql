@@ -27,7 +27,7 @@ import rascql.postgresql.protocol._
  *
  * @author Philip L. McMahon
  */
-class DecoderStage(c: Charset, maxLength: Int) extends StatefulStage[ByteString, BackendMessage] {
+case class DecoderStage(c: Charset, maxLength: Int) extends StatefulStage[ByteString, BackendMessage] {
 
   def initial = new StageState[ByteString, BackendMessage] {
 

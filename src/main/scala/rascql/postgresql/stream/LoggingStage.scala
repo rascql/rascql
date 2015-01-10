@@ -16,7 +16,8 @@
 
 package rascql.postgresql.stream
 
-import akka.event.LoggingAdapter
+import akka.actor.ActorSystem
+import akka.event._
 import akka.stream.stage._
 
 /**
@@ -24,26 +25,33 @@ import akka.stream.stage._
  *
  * @author Philip L. McMahon
  */
-class LoggingStage[A](name: String, log: LoggingAdapter) extends PushStage[A, A] {
+case class LoggingStage[A](log: LoggingAdapter) extends PushStage[A, A] {
 
   override def onDownstreamFinish(ctx: Context[A]) = {
-    log.debug("{} downstream finished", name)
+    log.debug("Downstream finished")
     super.onDownstreamFinish(ctx)
   }
 
   override def onUpstreamFailure(cause: Throwable, ctx: Context[A]) = {
-    log.debug("{} upstream failed ({})", name, cause.getMessage)
+    log.debug("Upstream failed ({})", cause.getMessage)
     super.onUpstreamFailure(cause, ctx)
   }
 
   override def onUpstreamFinish(ctx: Context[A]) = {
-    log.debug("{} upstream finished", name)
+    log.debug("Upstream finished")
     super.onUpstreamFinish(ctx)
   }
 
   override def onPush(elem: A, ctx: Context[A]) = {
-    log.debug("{} pushing {}", name, elem)
+    log.debug("Pushing {}", elem)
     ctx.push(elem)
   }
+
+}
+
+object LoggingStage {
+
+  def apply[A](name: String)(implicit sys: ActorSystem): LoggingStage[A] =
+    new LoggingStage[A]( Logging(sys, name))
 
 }
