@@ -16,19 +16,24 @@
 
 package rascql.postgresql
 
+import scala.util.control.NoStackTrace
 import rascql.postgresql.protocol._
 
 package stream {
 
-  sealed abstract class StreamException(msg: String) extends RuntimeException(msg)
+  sealed abstract class StreamException(msg: String)
+    extends RuntimeException(msg) with NoStackTrace
 
-  class UnsupportedAuthenticationRequestException(request: AuthenticationRequest)
+  @SerialVersionUID(1)
+  case class UnsupportedAuthenticationRequest(request: AuthenticationRequest)
     extends StreamException(s"Authentication request ${request.getClass.getSimpleName} is not supported")
 
-  class AuthenticationFailedException(errors: Seq[ErrorResponse.Field])
+  @SerialVersionUID(1)
+  case class AuthenticationFailed(errors: Seq[ErrorResponse.Field])
     extends StreamException(s"Authentication failed (${errors.mkString(", ")})")
 
-  class UnexpectedBackendMessageException(message: BackendMessage)
+  @SerialVersionUID(1)
+  case class UnexpectedBackendMessage(message: BackendMessage)
     extends StreamException(s"Unexpected backend message with type '${message.getClass.getSimpleName}'")
 
 }

@@ -34,11 +34,11 @@ case class AuthenticationStage(username: String, password: String) extends PushS
     case AuthenticationMD5Password(salt) =>
       ctx.push(PasswordMessage(Password.MD5(username, password, salt)))
     case r: AuthenticationRequest =>
-      ctx.fail(new UnsupportedAuthenticationRequestException(r))
+      ctx.fail(UnsupportedAuthenticationRequest(r))
     case ErrorResponse(fields) =>
-      ctx.fail(new AuthenticationFailedException(fields))
+      ctx.fail(AuthenticationFailed(fields))
     case _ =>
-      ctx.fail(new UnexpectedBackendMessageException(msg))
+      ctx.fail(UnexpectedBackendMessage(msg))
   }
 
 }

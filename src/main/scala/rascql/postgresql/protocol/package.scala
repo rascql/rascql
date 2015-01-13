@@ -21,6 +21,7 @@ import java.nio.charset.Charset
 import java.security.MessageDigest
 import scala.annotation.switch
 import scala.collection.immutable
+import scala.util.control.NoStackTrace
 import scala.util.Try
 import akka.util._
 
@@ -144,7 +145,7 @@ package protocol {
           val msgLength = iter.getInt
           val contentLength = msgLength - 4 // Minus 4 bytes for int
           if (contentLength > maxLen) {
-            throw new MessageTooLongException(code, contentLength, maxLen)
+            throw MessageTooLong(code, contentLength, maxLen)
           } else if (iter.len >= contentLength) {
             val decoder = (code: @switch) match {
               case 'R' => AuthenticationRequest
@@ -170,7 +171,7 @@ package protocol {
               case 's' => PortalSuspended
               case 'Z' => ReadyForQuery
               case 'T' => RowDescription
-              case _ => throw new UnsupportedMessageTypeException(code)
+              case _ => throw UnsupportedMessageType(code)
             }
             // Consume fixed number of bytes from iterator as sub-iterator
             decoded :+= decoder.decode(c, iter.nextBytes(contentLength))
@@ -201,7 +202,7 @@ package protocol {
         case 7 => AuthenticationGSS
         case 8 => AuthenticationGSSContinue(b.toByteString) // TODO compact?
         case 9 => AuthenticationSSPI
-        case m => throw new UnsupportedAuthenticationMethodException(m)
+        case m => throw UnsupportedAuthenticationMethod(m)
       }
     }
 
@@ -338,15 +339,15 @@ package protocol {
       apply(format match {
         case Text =>
           // All columns must have format text
-          val invalid = types.
-            zipWithIndex.
-            filter(_._1 == Format.Binary)
-
-          if (invalid.nonEmpty) {
-            throw new TextOnlyCopyFormatException(invalid.map(_._2))
-          } else {
-            Matched(format, size)
-          }
+          types.zipWithIndex.
+            collect {
+              case (Format.Binary, idx) => idx
+            } match {
+              case Vector() =>
+                Matched(format, size)
+              case indices =>
+                throw UnexpectedBinaryColumnFormat(indices)
+            }
         case Binary =>
           Mixed(types)
       })
@@ -520,7 +521,7 @@ package protocol {
           case 'I' => Idle
           case 'T' => Open
           case 'E' => Failed
-          case s => throw new UnsupportedTransactionStatusException(s)
+          case s => throw UnsupportedTransactionStatus(s)
         }
       )
 
@@ -580,7 +581,7 @@ package protocol {
         case 'S' => Accepted
         case 'N' => Rejected
         case _ =>
-          throw new UnsupportedSSLReplyException(b)
+          throw UnsupportedSSLReply(b)
       }
 
     }
@@ -721,7 +722,7 @@ package protocol {
     def decode(typ: Short) = typ match {
       case 0 => Text
       case 1 => Binary
-      case _ => throw new UnsupportedFormatTypeException(typ)
+      case _ => throw UnsupportedFormatType(typ)
     }
 
   }
@@ -867,30 +868,35 @@ package protocol {
 
   }
 
-  sealed abstract class DecoderException(msg: String) extends RuntimeException(msg)
+  sealed abstract class DecoderException(msg: String)
+    extends RuntimeException(msg) with NoStackTrace
 
-  class MessageTooLongException(typ: Byte, length: Int, limit: Int)
+  @SerialVersionUID(1)
+  case class MessageTooLong(typ: Byte, length: Int, limit: Int)
     extends DecoderException(s"Message type ${Integer.toHexString(typ)} with length $length exceeds maximum of $limit bytes")
 
-  class UnsupportedMessageTypeException(typ: Byte)
+  @SerialVersionUID(1)
+  case class UnsupportedMessageType(typ: Byte)
     extends DecoderException(s"Message type ${Integer.toHexString(typ)} is not supported")
 
-  class UnsupportedAuthenticationMethodException(method: Int)
+  @SerialVersionUID(1)
+  case class UnsupportedAuthenticationMethod(method: Int)
     extends DecoderException(s"Authentication method $method is not supported")
 
-  class UnsupportedSSLReplyException(typ: Byte)
+  @SerialVersionUID(1)
+  case class UnsupportedSSLReply(typ: Byte)
     extends DecoderException(s"SSL reply ${Integer.toHexString(typ)} is not supported")
 
-  class UnsupportedFormatTypeException(typ: Short)
+  @SerialVersionUID(1)
+  case class UnsupportedFormatType(typ: Short)
     extends DecoderException(s"Format type ${Integer.toHexString(typ)} is not supported")
 
-  class TextOnlyCopyFormatException(columns: Iterable[Int])
+  @SerialVersionUID(1)
+  case class UnexpectedBinaryColumnFormat(columns: Iterable[Int])
     extends DecoderException(s"Text COPY format does not allow binary column types in columns ${columns.mkString(", ")}")
 
-  class UnsupportedTransactionStatusException(typ: Byte)
+  @SerialVersionUID(1)
+  case class UnsupportedTransactionStatus(typ: Byte)
     extends DecoderException(s"Transaction status ${Integer.toHexString(typ)} is not supported")
-
-  class UnsupportedParameterValueException(value: String)
-    extends DecoderException(s"Parameter value '$value' is not supported")
 
 }
