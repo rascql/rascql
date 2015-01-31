@@ -37,8 +37,8 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   implicit val system = ActorSystem("Example")
   implicit val materializer = FlowMaterializer()
 
-  val charset = Charset.forName("UTF-8")
-  val maxLength = 16 * 1024 * 1024
+  var charset = Charset.forName("UTF-8")
+  val bulkDecoder = BulkDecoder(charset, 16 * 1024 * 1024)
 
   val Array(username, password) = args
 
@@ -110,7 +110,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val codec = Flow() { implicit b =>
     val decoder = Flow[ByteString].section(name("decoder")) {
-      _.transform(() => DecoderStage(charset, maxLength)).
+      _.transform(() => DecoderStage(bulkDecoder)).
         transform(() => LoggingStage("Decoder"))
     }
     val encoder = Flow[FrontendMessage].section(name("encoder")) {

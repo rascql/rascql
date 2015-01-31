@@ -135,56 +135,65 @@ package protocol {
 
     }
 
-    def decodeAll(c: Charset, maxLen: Int, bytes: ByteString): Try[(immutable.Seq[BackendMessage], ByteString)] = {
-      Try {
-        var decoded = Vector.empty[BackendMessage]
-        var remaining = ByteString.empty
-        val iter = bytes.iterator
-        while (iter.hasNext) {
-          val code = iter.getByte
-          val msgLength = iter.getInt
-          val contentLength = msgLength - 4 // Minus 4 bytes for int
-          if (contentLength > maxLen) {
-            throw MessageTooLong(code, contentLength, maxLen)
-          } else if (iter.len >= contentLength) {
-            val decoder = (code: @switch) match {
-              case 'R' => AuthenticationRequest
-              case 'K' => BackendKeyData
-              case '2' => BindComplete
-              case '3' => CloseComplete
-              case 'C' => CommandComplete
-              case 'd' => CopyData
-              case 'c' => CopyDone
-              case 'G' => CopyInResponse
-              case 'H' => CopyOutResponse
-              case 'W' => CopyBothResponse
-              case 'D' => DataRow
-              case 'I' => EmptyQueryResponse
-              case 'E' => ErrorResponse
-              case 'V' => FunctionCallResponse
-              case 'n' => NoData
-              case 'N' => NoticeResponse
-              case 'A' => NotificationResponse
-              case 't' => ParameterDescription
-              case 'S' => ParameterStatus
-              case '1' => ParseComplete
-              case 's' => PortalSuspended
-              case 'Z' => ReadyForQuery
-              case 'T' => RowDescription
-              case _ => throw UnsupportedMessageType(code)
-            }
-            // Consume fixed number of bytes from iterator as sub-iterator
-            decoded :+= decoder.decode(c, iter.nextBytes(contentLength))
-          } else {
-            // Need more data for this message
-            // Free bytes which have already been decoded and consume iterator
-            remaining = iter.toByteString // TODO compact?
+  }
+
+  case class BulkDecoder(charset: Charset, maxMessageLength: Int) {
+
+    import BulkDecoder._
+
+    def decode(bytes: ByteString): Result = {
+      var decoded = Vector.empty[BackendMessage]
+      var remaining = ByteString.empty
+      val iter = bytes.iterator
+      while (iter.hasNext) {
+        val code = iter.getByte
+        val msgLength = iter.getInt
+        val contentLength = msgLength - 4 // Minus 4 bytes for int
+        if (contentLength > maxMessageLength) {
+          throw MessageTooLong(code, contentLength, maxMessageLength)
+        } else if (iter.len >= contentLength) {
+          val d = (code: @switch) match {
+            case 'R' => AuthenticationRequest
+            case 'K' => BackendKeyData
+            case '2' => BindComplete
+            case '3' => CloseComplete
+            case 'C' => CommandComplete
+            case 'd' => CopyData
+            case 'c' => CopyDone
+            case 'G' => CopyInResponse
+            case 'H' => CopyOutResponse
+            case 'W' => CopyBothResponse
+            case 'D' => DataRow
+            case 'I' => EmptyQueryResponse
+            case 'E' => ErrorResponse
+            case 'V' => FunctionCallResponse
+            case 'n' => NoData
+            case 'N' => NoticeResponse
+            case 'A' => NotificationResponse
+            case 't' => ParameterDescription
+            case 'S' => ParameterStatus
+            case '1' => ParseComplete
+            case 's' => PortalSuspended
+            case 'Z' => ReadyForQuery
+            case 'T' => RowDescription
+            case _ => throw UnsupportedMessageType(code)
           }
+          // Consume fixed number of bytes from iterator as sub-iterator
+          decoded :+= d.decode(charset, iter.nextBytes(contentLength))
+        } else {
+          // Need more data for this message
+          // Free bytes which have already been decoded and consume iterator
+          remaining = iter.toByteString // TODO compact?
         }
-        decoded -> remaining
       }
+      Result(decoded, remaining)
     }
 
+  }
+
+  object BulkDecoder {
+
+    case class Result(messages: immutable.Seq[BackendMessage], remainder: ByteString)
 
   }
 
