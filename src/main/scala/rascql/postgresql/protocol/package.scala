@@ -78,14 +78,14 @@ package object protocol {
     def encoded: ByteString = f.fold(FieldFormats.Default)(_.encoded)
   }
 
-  private[protocol] implicit class RichSeqOfParameter(val p: Seq[Parameter]) extends AnyVal {
-    def encode(c: Charset): ByteString =
-      ByteString.newBuilder.
-        putShort(p.size).
-        putShorts(p.map(_.format.toShort).toArray).
-        putShort(p.size).
-        append(p.foldLeft(ByteString.empty)(_ ++ _.encode(c))).
-        result
+  private[protocol] implicit class RichSeqOfParameter(val s: Seq[Parameter]) extends AnyVal {
+    def encode(c: Charset): ByteString = {
+      val size = ByteString.newBuilder.putShort(s.size).result
+      val (formats, values) = s.unzip { p => p.format.toShort -> p.encode(c) }
+      size ++
+        formats.foldLeft(ByteString.newBuilder)((b, f) => b.putShort(f)).result ++
+        values.foldLeft(size)(_ ++ _)
+    }
   }
 
 }
@@ -142,8 +142,8 @@ package protocol {
     import BulkDecoder._
 
     def decode(bytes: ByteString): Result = {
-      var decoded = Vector.empty[BackendMessage]
-      var remaining = ByteString.empty
+      var messages = Vector.empty[BackendMessage]
+      var remainder = ByteString.empty
       val iter = bytes.iterator
       while (iter.hasNext) {
         val code = iter.getByte
@@ -179,14 +179,14 @@ package protocol {
             case _ => throw UnsupportedMessageType(code)
           }
           // Consume fixed number of bytes from iterator as sub-iterator
-          decoded :+= d.decode(charset, iter.nextBytes(contentLength))
+          messages :+= d.decode(charset, iter.nextBytes(contentLength))
         } else {
           // Need more data for this message
           // Free bytes which have already been decoded and consume iterator
-          remaining = iter.toByteString // TODO compact?
+          remainder = iter.toByteString // TODO compact?
         }
       }
-      Result(decoded, remaining)
+      Result(messages, remainder)
     }
 
   }
@@ -378,16 +378,18 @@ package protocol {
 
   object CopyBothResponse extends CopyResponseDecoder('W')
 
-  case class DataRow(values: immutable.IndexedSeq[Option[Decodable]]) extends BackendMessage
+  case class DataRow(values: immutable.IndexedSeq[Column]) extends BackendMessage
 
   object DataRow extends Decoder {
 
     def decode(c: Charset, b: ByteIterator) =
       DataRow((0 until b.getShort) map { _ =>
-        Option(b.getInt).
-          filterNot(_ < 0).
-          map(b.nextBytes(_).toByteString). // TODO compact?
-          map(Decodable(_, c))
+        Column(
+          Option(b.getInt).
+            filterNot(_ < 0).
+            map(b.nextBytes(_).toByteString), // TODO compact?
+          c
+        )
       })
 
   }
@@ -629,21 +631,34 @@ package protocol {
 
   // Note that the PostgreSQL documentation recommends only encoding parameters
   // using the text format, since it is portable across versions.
-  case class Parameter(value: Option[Encodable], format: Format = Format.Text) {
+  trait Parameter {
 
-    def encode(c: Charset): ByteString =
-      value.fold(Parameter.NULL)(_.encode(c).prependLength)
+    def format: Format = Format.Text
+
+    // Fully encode parameter including 4-byte length prefix
+    def encode(c: Charset): ByteString
 
   }
 
+  // TODO Make inner class of Bind/FunctionCall companion objects?
   object Parameter {
 
-    private val NULL = ByteString.newBuilder.putInt(-1).result
+    val NULL: Parameter = Parameter {
+      ByteString.newBuilder.putInt(-1).result
+    }
 
-    // If value is null, Parameter argument will be None
-    def apply(value: Encodable): Parameter = Parameter(Option(value))
+    def apply(fn: Charset => ByteString): Parameter = new Parameter {
+      def encode(c: Charset) = fn(c)
+    }
+
+    def apply(bytes: ByteString): Parameter = new Parameter {
+      def encode(c: Charset) = bytes
+    }
 
   }
+
+  // TODO Make inner class of DataRow companion object?
+  case class Column(value: Option[ByteString], charset: Charset)
 
   sealed trait CommandTag
 

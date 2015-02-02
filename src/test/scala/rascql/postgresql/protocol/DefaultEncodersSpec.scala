@@ -14,7 +14,7 @@
  * under the License.
  */
 
-package rascql.postgresql
+package rascql.postgresql.protocol
 
 import java.nio.charset.Charset
 import akka.util.ByteString
@@ -30,8 +30,8 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
   val charset = Charset.forName("UTF-8")
 
   implicit class RichEncodable[T](t: T)(implicit e: Encoder[T]) {
-    def asEncodable = e(t)
-    def encoded = asEncodable.encode(charset)
+    def encoded = encodedRaw.drop(4) // Drop length
+    def encodedRaw = t.encode(charset)
   }
 
   "Implicit encoders" should {
@@ -39,7 +39,9 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
     "encode a string" in {
 
       "".encoded === ByteString("")
+      "".encodedRaw === ByteString(0x0, 0x0, 0x0, 0x0)
       "ABC".encoded === ByteString("ABC")
+      null.asInstanceOf[String].encodedRaw === ByteString(0x0, 0x0, 0x0, 0x255)
 
     }
 
@@ -65,12 +67,6 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
     "encode a byte array" in {
 
       Array[Byte](0x2, 0x23).encoded === ByteString("\\x0123")
-
-    }
-
-    "encode a byte list" in {
-
-      List[Byte](0x0, 0x1).encoded === ByteString("\\x0001")
 
     }
 

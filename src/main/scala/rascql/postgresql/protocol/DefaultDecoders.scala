@@ -14,21 +14,34 @@
  * under the License.
  */
 
-package rascql.postgresql
+package rascql.postgresql.protocol
 
+import java.nio.charset.Charset
 import java.text.SimpleDateFormat
-import scala.util.Try
+import akka.util.ByteString
 
 /**
  * @author Philip L. McMahon
  */
 trait DefaultDecoders {
 
-  implicit class RichDecodable(d: Decodable) {
+  type Decoder[T] = Column => Option[T]
+
+  object Decoder {
+
+    def apply[T](fn: (ByteString, Charset) => T): Decoder[T] = {
+      case Column(b, c) => b.map(fn(_, c))
+    }
+
+  }
+
+  implicit class RichColumn(c: Column) {
 
     // TODO Support a "retry" with a different decoder if this attempt fails?
     // Eg, val r = Either[Y, X] = d.as[X].orElse[Y]
-    def as[T](implicit r: Decoder[T]): Try[T] = Try(r(d))
+    def as[T](implicit d: Decoder[T]): T = d(c).get
+
+    def asOpt[T](implicit d: Decoder[T]): Option[T] = d(c)
 
   }
 
@@ -36,7 +49,7 @@ trait DefaultDecoders {
 
   protected object FromStringDecoder {
 
-    def apply[T](fn: String => T): Decoder[T] = StringDecoder.andThen(fn)
+    def apply[T](fn: String => T): Decoder[T] = StringDecoder.andThen(_.map(fn))
 
   }
 
@@ -50,7 +63,7 @@ trait DefaultDecoders {
 
   protected object FromBytesDecoder {
 
-    def apply[T](fn: Array[Byte] => T): Decoder[T] = BytesDecoder.andThen(fn)
+    def apply[T](fn: Array[Byte] => T): Decoder[T] = BytesDecoder.andThen(_.map(fn))
 
   }
 

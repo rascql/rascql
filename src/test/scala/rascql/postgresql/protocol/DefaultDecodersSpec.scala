@@ -14,7 +14,7 @@
  * under the License.
  */
 
-package rascql.postgresql
+package rascql.postgresql.protocol
 
 import java.nio.charset.Charset
 import akka.util.ByteString
@@ -29,87 +29,87 @@ class DefaultDecodersSpec extends WordSpec with DefaultDecoders {
 
   val charset = Charset.forName("UTF-8")
 
-  private def decodable(s: String) = Decodable(ByteString(s), charset)
+  private def column(s: String) = Column(Some(ByteString(s)), charset)
 
   "Implicit decoders" should {
 
     "decode a string" in {
 
-      decodable("").as[String] === ""
-      decodable("ABC").as[String] === "ABC"
+      column("").as[String] === ""
+      column("ABC").as[String] === "ABC"
 
     }
 
     "decode a big decimal" in {
 
-      decodable("0.1").as[BigDecimal] === BigDecimal("0.1")
+      column("0.1").as[BigDecimal] === BigDecimal("0.1")
 
     }
 
     "decode a big int" in {
 
-      decodable("0").as[BigInt] === BigInt("0")
+      column("0").as[BigInt] === BigInt("0")
 
     }
 
     "decode a boolean" in {
 
-      decodable("t").as[Boolean] === true
-      decodable("f").as[Boolean] === false
+      column("t").as[Boolean] === true
+      column("f").as[Boolean] === false
 
     }
 
     "decode a byte array" in {
 
-      decodable("\\x0123").as[Array[Byte]] === Array[Byte](0x1, 0x23)
+      column("\\x0123").as[Array[Byte]] === Array[Byte](0x1, 0x23)
 
     }
 
     "decode a byte" in {
 
-      decodable("\\x00").as[Byte] === 0.toByte
+      column("\\x00").as[Byte] === 0.toByte
 
     }
 
     "decode a char" in {
 
-      decodable(" ").as[Char] === ' '
+      column(" ").as[Char] === ' '
 
     }
 
     "decode a date" in {
 
-      decodable("1970-01-01").as[java.util.Date] === new java.util.Date(0)
+      column("1970-01-01").as[java.util.Date] === new java.util.Date(0)
 
     }
 
     "decode a double" in {
 
-      decodable("0.1").as[Double] === 0.1d
+      column("0.1").as[Double] === 0.1d
 
     }
 
     "decode a float" in {
 
-      decodable("0.1").as[Float] === 0.1f
+      column("0.1").as[Float] === 0.1f
 
     }
 
     "decode an int" in {
 
-      decodable("0").as[Int] === 0
+      column("0").as[Int] === 0
 
     }
 
     "decode a long" in {
 
-      decodable("0").as[Long] === 0L
+      column("0").as[Long] === 0L
 
     }
 
     "decode a short" in {
 
-      decodable("0").as[Short] === 0.toShort
+      column("0").as[Short] === 0.toShort
 
     }
 

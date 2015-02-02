@@ -76,7 +76,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val preparedStatement = Source.single(List(
     Parse("SELECT usename FROM pg_stat_activity WHERE usename = $1 LIMIT $2"),
-    Bind(Seq(Parameter(username), Parameter(1))),
+    Bind(Seq(username, 1)),
     Describe(PreparedStatement.Unnamed),
     Execute(Portal.Unnamed),
     Sync
