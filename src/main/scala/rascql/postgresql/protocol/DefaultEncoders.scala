@@ -36,7 +36,7 @@ trait DefaultEncoders {
   private val HexPrefix = ByteString("\\x")
   private val Zero = ByteString("0")
   // FIXME Does the date format need to match a connection-specific parameter?
-  private val NullDate = Parameter(ByteString("0000-00-00").prependLength)
+  private val NullDate = Parameter(ByteString("0000-00-00"))
 
   // TODO Use code in Password companion object?
   private implicit class RichByte(b: Byte) {
@@ -48,68 +48,60 @@ trait DefaultEncoders {
 
   object Nullable {
 
-    def apply[T](fn: T => ByteString): Encoder[T] = {
-      _.map(fn(_).prependLength).
+    def apply[T](fn: T => ByteString): Encoder[T] =
+      _.map(fn).fold(Parameter.NULL)(Parameter(_))
+
+    def apply[T](fn: (T, Charset) => Array[Byte]): Encoder[T] =
+      _.map(fn.curried(_).andThen(ByteString(_))).
         fold(Parameter.NULL)(Parameter(_))
-    }
-
-    def apply[T](fn: (T, Charset) => Array[Byte]): Encoder[T] = {
-      _.fold(Parameter.NULL) { v =>
-          Parameter { c =>
-            ByteString(fn(v, c)).prependLength
-          }
-        }
-    }
 
   }
 
-  implicit val StringEncoder: Encoder[String] = Nullable {
-    _.getBytes(_)
-  }
+  implicit val StringEncoder: Encoder[String] =
+    Nullable { _.getBytes(_) }
 
   // Defer string conversion until encoded form is requested
-  def LazyToStringEncoder[T]: Encoder[T] = Nullable {
-    _.toString.getBytes(_)
-  }
+  def LazyToStringEncoder[T]: Encoder[T] =
+    Nullable { _.toString.getBytes(_) }
 
-  implicit val BigDecimalEncoder: Encoder[BigDecimal] = LazyToStringEncoder
+  implicit val BigDecimalEncoder: Encoder[BigDecimal] =
+    LazyToStringEncoder
 
-  implicit val BigIntEncoder: Encoder[BigInt] = LazyToStringEncoder
+  implicit val BigIntEncoder: Encoder[BigInt] =
+    LazyToStringEncoder
 
-  implicit val BooleanEncoder: Encoder[Boolean] = Nullable {
-    if (_) True else False
-  }
+  implicit val BooleanEncoder: Encoder[Boolean] =
+    Nullable { if (_) True else False }
 
-  implicit val ByteArrayEncoder: Encoder[Array[Byte]] = Nullable {
-    _.foldLeft(HexPrefix)(_ ++ _.toHex)
-  }
+  implicit val ByteArrayEncoder: Encoder[Array[Byte]] =
+    Nullable { _.foldLeft(HexPrefix)(_ ++ _.toHex) }
 
-  implicit val ByteEncoder: Encoder[Byte] = Nullable {
-    HexPrefix ++ _.toHex
-  }
+  implicit val ByteEncoder: Encoder[Byte] =
+    Nullable { HexPrefix ++ _.toHex }
 
-  implicit val CharEncoder: Encoder[Char] = LazyToStringEncoder
+  implicit val CharEncoder: Encoder[Char] =
+    LazyToStringEncoder
 
   // FIXME Inefficient due to creation of SDF
   // TODO Add implicit date formatter driven by connection parameters?
-  implicit val DateEncoder: Encoder[java.util.Date] = {
+  implicit val DateEncoder: Encoder[java.util.Date] =
     _.map(new SimpleDateFormat("yyyy-MM-dd").format(_)).
-      fold(NullDate) { s =>
-        Parameter { c =>
-          ByteString(s.getBytes(c)).prependLength
-        }
-      }
-  }
+      fold(NullDate) { s => Parameter { c => ByteString(s.getBytes(c)) } }
 
-  implicit val DoubleEncoder: Encoder[Double] = LazyToStringEncoder
+  implicit val DoubleEncoder: Encoder[Double] =
+    LazyToStringEncoder
 
-  implicit val FloatEncoder: Encoder[Float] = LazyToStringEncoder
+  implicit val FloatEncoder: Encoder[Float] =
+    LazyToStringEncoder
 
-  implicit val IntEncoder: Encoder[Int] = LazyToStringEncoder
+  implicit val IntEncoder: Encoder[Int] =
+    LazyToStringEncoder
 
-  implicit val LongEncoder: Encoder[Long] = LazyToStringEncoder
+  implicit val LongEncoder: Encoder[Long] =
+    LazyToStringEncoder
 
-  implicit val ShortEncoder: Encoder[Short] = LazyToStringEncoder
+  implicit val ShortEncoder: Encoder[Short] =
+    LazyToStringEncoder
 
 }
 
