@@ -633,7 +633,7 @@ package protocol {
   // using the text format, since it is portable across versions.
   trait Parameter {
 
-    def format: Format = Format.Text
+    def format: Format
 
     // Fully encode parameter including 4-byte length prefix
     def encode(c: Charset): ByteString
@@ -647,11 +647,15 @@ package protocol {
       ByteString.newBuilder.putInt(-1).result
     }
 
-    def apply(fn: Charset => ByteString): Parameter = new Parameter {
+    def apply(f: Format)(fn: Charset => ByteString): Parameter = new Parameter {
+      val format = f
       def encode(c: Charset) = fn(c)
     }
 
-    def apply(bytes: ByteString): Parameter = new Parameter {
+    def apply(fn: Charset => ByteString): Parameter = Parameter(Format.Text)(fn)
+
+    def apply(bytes: ByteString, f: Format = Format.Text): Parameter = new Parameter {
+      val format = f
       def encode(c: Charset) = bytes
     }
 
