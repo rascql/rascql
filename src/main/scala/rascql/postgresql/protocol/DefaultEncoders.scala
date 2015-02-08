@@ -51,9 +51,12 @@ trait DefaultEncoders {
     def apply[T](fn: T => ByteString): Encoder[T] =
       _.map(fn).fold(Parameter.NULL)(Parameter(_))
 
-    def apply[T](fn: (T, Charset) => Array[Byte]): Encoder[T] =
+    def apply[T](default: Parameter)(fn: (T, Charset) => Array[Byte]): Encoder[T] =
       _.map(fn.curried(_).andThen(ByteString(_))).
-        fold(Parameter.NULL)(Parameter(_))
+        fold(default)(Parameter(_))
+
+    def apply[T](fn: (T, Charset) => Array[Byte]): Encoder[T] =
+      Nullable(Parameter.NULL)(fn)
 
   }
 
@@ -85,8 +88,9 @@ trait DefaultEncoders {
   // FIXME Inefficient due to creation of SDF
   // TODO Add implicit date formatter driven by connection parameters?
   implicit val DateEncoder: Encoder[java.util.Date] =
-    _.map(new SimpleDateFormat("yyyy-MM-dd").format(_)).
-      fold(NullDate) { s => Parameter { c => ByteString(s.getBytes(c)) } }
+    Nullable(NullDate) {
+      new SimpleDateFormat("yyyy-MM-dd").format(_).getBytes(_)
+    }
 
   implicit val DoubleEncoder: Encoder[Double] =
     LazyToStringEncoder
