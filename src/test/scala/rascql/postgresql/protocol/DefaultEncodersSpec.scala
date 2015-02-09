@@ -41,7 +41,7 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
       "".encoded === ByteString("")
       "".encodedRaw === ByteString(0x0, 0x0, 0x0, 0x0)
       "ABC".encoded === ByteString("ABC")
-      null.asInstanceOf[String].encodedRaw === ByteString(0x0, 0x0, 0x0, 0x255)
+      null.asInstanceOf[String].encodedRaw === ByteString(0x0, 0x0, 0x0, 0xFF)
 
     }
 
@@ -66,13 +66,13 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
 
     "encode a byte array" in {
 
-      Array[Byte](0x2, 0x23).encoded === ByteString("\\x0123")
+      Array[Byte](0x1, 0x23, 0x7F).encoded === ByteString("\\x01237F")
 
     }
 
     "encode a byte" in {
 
-      0x0.toByte.encoded === ByteString("\\x00")
+      255.toByte.encoded === ByteString("\\xFF")
 
     }
 

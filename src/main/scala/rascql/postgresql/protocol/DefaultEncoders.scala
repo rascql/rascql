@@ -34,16 +34,12 @@ trait DefaultEncoders {
   private val True = ByteString("t")
   private val False = ByteString("f")
   private val HexPrefix = ByteString("\\x")
-  private val Zero = ByteString("0")
+  private val HexChunks = 0.to(255).map("%02x".format(_).toUpperCase).map(ByteString(_))
   // FIXME Does the date format need to match a connection-specific parameter?
   private val NullDate = Parameter(ByteString("0000-00-00"))
 
-  // TODO Use code in Password companion object?
   private implicit class RichByte(b: Byte) {
-    def toHex: ByteString = {
-      val h = Integer.toHexString(b)
-      if (h.length == 1) Zero ++ ByteString(h) else ByteString(h)
-    }
+    @inline def toHex: ByteString = HexChunks(b & 0xFF)
   }
 
   object Nullable {
