@@ -25,60 +25,62 @@ import org.scalatest._
  *
  * @author Philip L. McMahon
  */
-class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
+class DefaultEncodersSpec extends WordSpec with Matchers with DefaultEncoders {
 
   val charset = Charset.forName("UTF-8")
 
   implicit class RichEncodable[T](t: T)(implicit e: Encoder[T]) {
     def encoded = encodedRaw.drop(4) // Drop length
     def encodedRaw = t.encode(charset)
+    def shouldEncodeTo(right: ByteString) = t.encoded.shouldEqual(right)
+    def shouldEncodeToRaw(right: ByteString) = t.encodedRaw.shouldEqual(right)
   }
 
   "Implicit encoders" should {
 
     "encode a string" in {
 
-      "".encoded === ByteString("")
-      "".encodedRaw === ByteString(0x0, 0x0, 0x0, 0x0)
-      "ABC".encoded === ByteString("ABC")
-      null.asInstanceOf[String].encodedRaw === ByteString(0x0, 0x0, 0x0, 0xFF)
+      "" shouldEncodeTo ByteString("")
+      "" shouldEncodeToRaw ByteString(0x0, 0x0, 0x0, 0x0)
+      "ABC" shouldEncodeTo ByteString("ABC")
+      null.asInstanceOf[String] shouldEncodeToRaw ByteString(0xFF, 0xFF, 0xFF, 0xFF)
 
     }
 
     "encode a big decimal" in {
 
-      BigDecimal("0.1").encoded === ByteString("0.1")
+      BigDecimal("0.1") shouldEncodeTo ByteString("0.1")
 
     }
 
     "encode a big int" in {
 
-      BigInt("1").encoded === ByteString("1")
+      BigInt("1") shouldEncodeTo ByteString("1")
 
     }
 
     "encode a boolean" in {
 
-      true.encoded === ByteString("t")
-      false.encoded === ByteString("f")
+      true shouldEncodeTo ByteString("t")
+      false shouldEncodeTo ByteString("f")
 
     }
 
     "encode a byte array" in {
 
-      Array[Byte](0x1, 0x23, 0x7F).encoded === ByteString("\\x01237F")
+      Array[Byte](0x1, 0x23, 0x7F) shouldEncodeTo ByteString("\\x01237F")
 
     }
 
     "encode a byte" in {
 
-      255.toByte.encoded === ByteString("\\xFF")
+      255.toByte shouldEncodeTo ByteString("\\xFF")
 
     }
 
     "encode a char" in {
 
-      'x'.encoded === ByteString("x")
+      'x' shouldEncodeTo ByteString("x")
 
     }
 
@@ -91,31 +93,31 @@ class DefaultEncodersSpec extends WordSpec with DefaultEncoders {
 
     "encode a double" in {
 
-      0.1d.encoded === ByteString("0.1")
+      0.1d shouldEncodeTo ByteString("0.1")
 
     }
 
     "encode a float" in {
 
-      0.1f.encoded === ByteString("0.1")
+      0.1f shouldEncodeTo ByteString("0.1")
 
     }
 
     "encode an int" in {
 
-      0.encoded === ByteString("0")
+      0 shouldEncodeTo ByteString("0")
 
     }
 
     "encode a long" in {
 
-      0L.encoded === ByteString("0")
+      0L shouldEncodeTo ByteString("0")
 
     }
 
     "encode a short" in {
 
-      0.toShort.encoded === ByteString("0")
+      0.toShort shouldEncodeTo ByteString("0")
 
     }
 

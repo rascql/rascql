@@ -31,6 +31,7 @@ trait DefaultEncoders {
 
   implicit def encodeParameter[T](t: T)(implicit e: Encoder[T]): Parameter = e(Option(t))
 
+  private val UTC = java.util.TimeZone.getTimeZone("UTC")
   private val True = ByteString("t")
   private val False = ByteString("f")
   private val HexPrefix = ByteString("\\x")
@@ -85,7 +86,9 @@ trait DefaultEncoders {
   // TODO Add implicit date formatter driven by connection parameters?
   implicit val DateEncoder: Encoder[java.util.Date] =
     Nullable(NullDate) {
-      new SimpleDateFormat("yyyy-MM-dd").format(_).getBytes(_)
+      val sdf = new SimpleDateFormat("yyyy-MM-dd")
+      sdf.setTimeZone(UTC)
+      sdf.format(_).getBytes(_)
     }
 
   implicit val DoubleEncoder: Encoder[Double] =

@@ -25,7 +25,7 @@ import org.scalatest._
  *
  * @author Philip L. McMahon
  */
-class DefaultDecodersSpec extends WordSpec with DefaultDecoders {
+class DefaultDecodersSpec extends WordSpec with Matchers with DefaultDecoders {
 
   val charset = Charset.forName("UTF-8")
 
@@ -35,81 +35,81 @@ class DefaultDecodersSpec extends WordSpec with DefaultDecoders {
 
     "decode a string" in {
 
-      column("").as[String] === ""
-      column("ABC").as[String] === "ABC"
+      column("").as[String] shouldEqual ""
+      column("ABC").as[String] shouldEqual "ABC"
 
     }
 
     "decode a big decimal" in {
 
-      column("0.1").as[BigDecimal] === BigDecimal("0.1")
+      column("0.1").as[BigDecimal] shouldEqual BigDecimal("0.1")
 
     }
 
     "decode a big int" in {
 
-      column("0").as[BigInt] === BigInt("0")
+      column("0").as[BigInt] shouldEqual BigInt("0")
 
     }
 
     "decode a boolean" in {
 
-      column("t").as[Boolean] === true
-      column("f").as[Boolean] === false
+      column("t").as[Boolean] shouldEqual true
+      column("f").as[Boolean] shouldEqual false
 
     }
 
     "decode a byte array" in {
 
-      column("\\x0123").as[Array[Byte]] === Array[Byte](0x1, 0x23)
+      column("\\x01237f").as[Array[Byte]] shouldEqual Array[Byte](0x1, 0x23, 0x7F)
 
     }
 
     "decode a byte" in {
 
-      column("\\x00").as[Byte] === 0.toByte
+      column("\\xFF").as[Byte] shouldEqual 255.toByte
 
     }
 
     "decode a char" in {
 
-      column(" ").as[Char] === ' '
+      column(" ").as[Char] shouldEqual ' '
 
     }
 
     "decode a date" in {
 
-      column("1970-01-01").as[java.util.Date] === new java.util.Date(0)
+      column("1970-01-01").as[java.util.Date] shouldEqual new java.util.Date(0)
 
     }
 
     "decode a double" in {
 
-      column("0.1").as[Double] === 0.1d
+      column("0.1").as[Double] shouldEqual 0.1d
 
     }
 
     "decode a float" in {
 
-      column("0.1").as[Float] === 0.1f
+      column("0.1").as[Float] shouldEqual 0.1f
 
     }
 
     "decode an int" in {
 
-      column("0").as[Int] === 0
+      column("0").as[Int] shouldEqual 0
 
     }
 
     "decode a long" in {
 
-      column("0").as[Long] === 0L
+      column("0").as[Long] shouldEqual 0L
 
     }
 
     "decode a short" in {
 
-      column("0").as[Short] === 0.toShort
+      column("0").as[Short] shouldEqual 0.toShort
 
     }
 

@@ -27,6 +27,8 @@ trait DefaultDecoders {
 
   type Decoder[T] = Column => Option[T]
 
+  private val UTC = java.util.TimeZone.getTimeZone("UTC")
+
   object Decoder {
 
     def apply[T](fn: (ByteString, Charset) => T): Decoder[T] = {
@@ -45,44 +47,68 @@ trait DefaultDecoders {
 
   }
 
-  implicit val StringDecoder = Decoder { (b, c) => new String(b.toArray, c) }
+  implicit val StringDecoder: Decoder[String] =
+    Decoder { (b, c) => new String(b.toArray, c) }
 
   protected object FromStringDecoder {
 
-    def apply[T](fn: String => T): Decoder[T] = StringDecoder.andThen(_.map(fn))
+    def apply[T](fn: String => T): Decoder[T] =
+      StringDecoder.andThen(_.map(fn))
 
   }
 
-  implicit val BigDecimalDecoder = FromStringDecoder(BigDecimal(_))
+  implicit val BigDecimalDecoder: Decoder[BigDecimal] =
+    FromStringDecoder { BigDecimal(_) }
 
-  implicit val BigIntDecoder = FromStringDecoder(BigInt(_))
+  implicit val BigIntDecoder: Decoder[BigInt] =
+    FromStringDecoder { BigInt(_) }
 
-  implicit val BooleanDecoder = FromStringDecoder(_ == "t")
+  implicit val BooleanDecoder: Decoder[Boolean] =
+    FromStringDecoder { _ == "t" }
 
-  implicit val BytesDecoder = FromStringDecoder(_.stripPrefix("\\x").grouped(2).map(_.toByte).toArray)
+  implicit val BytesDecoder: Decoder[Array[Byte]] =
+    FromStringDecoder {
+      _.stripPrefix("\\x").
+        grouped(2).
+        map(java.lang.Integer.parseInt(_, 16).toByte).
+        toArray
+    }
 
   protected object FromBytesDecoder {
 
-    def apply[T](fn: Array[Byte] => T): Decoder[T] = BytesDecoder.andThen(_.map(fn))
+    def apply[T](fn: Array[Byte] => T): Decoder[T] =
+      BytesDecoder.andThen(_.map(fn))
 
   }
 
-  implicit val ByteDecoder = FromBytesDecoder(_.head) // FIXME Fail if more than one byte
+  implicit val ByteDecoder: Decoder[Byte] =
+    FromBytesDecoder { _.head } // FIXME Fail if more than one byte
 
-  implicit val CharDecoder = FromStringDecoder(_.head) // FIXME Fail if more than one character
+  implicit val CharDecoder: Decoder[Char] =
+    FromStringDecoder { _.head } // FIXME Fail if more than one character
 
   // FIXME Poor performance
-  implicit val DateDecoder = FromStringDecoder(new SimpleDateFormat("yyyy-MM-dd").parse(_))
+  implicit val DateDecoder: Decoder[java.util.Date] =
+    FromStringDecoder {
+      val sdf = new SimpleDateFormat("yyyy-MM-dd")
+      sdf.setTimeZone(UTC)
+      sdf.parse(_)
+    }
 
-  implicit val DoubleDecoder = FromStringDecoder(_.toDouble)
+  implicit val DoubleDecoder: Decoder[Double] =
+    FromStringDecoder { _.toDouble }
 
-  implicit val FloatDecoder = FromStringDecoder(_.toFloat)
+  implicit val FloatDecoder: Decoder[Float] =
+    FromStringDecoder { _.toFloat }
 
-  implicit val IntDecoder = FromStringDecoder(_.toInt)
+  implicit val IntDecoder: Decoder[Int] =
+    FromStringDecoder { _.toInt }
 
-  implicit val LongDecoder = FromStringDecoder(_.toLong)
+  implicit val LongDecoder: Decoder[Long] =
+    FromStringDecoder { _.toLong }
 
-  implicit val ShortDecoder = FromStringDecoder(_.toShort)
+  implicit val ShortDecoder: Decoder[Short] =
+    FromStringDecoder { _.toShort }
 
   // TODO Add Decoder[T] to Decoder[Option[T]] and other conversions?
 
