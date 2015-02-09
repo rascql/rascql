@@ -28,11 +28,16 @@ trait DefaultDecoders {
   type Decoder[T] = Column => Option[T]
 
   private val UTC = java.util.TimeZone.getTimeZone("UTC")
+  private val True = ByteString("t")
 
   object Decoder {
 
     def apply[T](fn: (ByteString, Charset) => T): Decoder[T] = {
       case Column(b, c) => b.map(fn(_, c))
+    }
+
+    def apply[T](fn: ByteString => T): Decoder[T] = {
+      case Column(b, _) => b.map(fn)
     }
 
   }
@@ -64,7 +69,7 @@ trait DefaultDecoders {
     FromStringDecoder { BigInt(_) }
 
   implicit val BooleanDecoder: Decoder[Boolean] =
-    FromStringDecoder { _ == "t" }
+    Decoder { _ == True }
 
   implicit val BytesDecoder: Decoder[Array[Byte]] =
     FromStringDecoder {
