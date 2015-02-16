@@ -25,10 +25,9 @@ import akka.util.ByteString
  */
 trait DefaultDecoders {
 
-  type Decoder[T] = Column => Option[T]
+  import DefaultEncoders.Constants._
 
-  private val UTC = java.util.TimeZone.getTimeZone("UTC")
-  private val True = ByteString("t")
+  type Decoder[T] = Column => Option[T]
 
   object Decoder {
 

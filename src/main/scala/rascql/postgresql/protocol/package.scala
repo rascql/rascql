@@ -34,6 +34,19 @@ package object protocol {
   private[protocol] implicit val order = ByteOrder.BIG_ENDIAN
 
   private[protocol] val NUL = 0x0.toByte
+  private[protocol] val HexChunks = 0x0.to(0xFF).map("%02x".format(_).toLowerCase).map(ByteString(_))
+
+  private[protocol] implicit class RichByte(val b: Byte) extends AnyVal {
+
+    @inline def asHex: ByteString = HexChunks(b & 0xFF)
+
+  }
+
+  private[protocol] implicit class RichArrayOfByte(val a: Array[Byte]) extends AnyVal {
+
+    @inline def asHex: ByteString = a.foldLeft(ByteString.empty)(_ ++ _.asHex)
+
+  }
 
   private[protocol] implicit class RichByteIterator(val b: ByteIterator) extends AnyVal {
 
@@ -60,17 +73,15 @@ package object protocol {
 
     @inline def putNUL: ByteStringBuilder = b.putByte(NUL)
 
-    def prependLength: ByteStringBuilder =
-      ByteString.newBuilder.
-        putInt(b.length + 4). // Include length of int
-        append(b.result)
+    def prependLength: ByteString =
+      ByteString.newBuilder.putInt(b.length + 4).result ++ b.result // Include length of int
 
   }
 
   private[protocol] implicit class RichByteString(val b: ByteString) extends AnyVal {
 
     def prependLength: ByteString =
-      ByteString.newBuilder.putInt(b.length).append(b).result
+      ByteString.newBuilder.putInt(b.length).result ++ b
 
   }
 
@@ -100,24 +111,19 @@ package protocol {
 
   object FrontendMessage {
 
-    sealed abstract class Empty(typ: Byte) extends FrontendMessage {
+    sealed abstract class Empty(bytes: ByteString) extends FrontendMessage {
 
-      private val data = ByteString.newBuilder.putByte(typ).putInt(4).result
+      def this(typ: Char) =
+        this(ByteString.newBuilder.putByte(typ.toByte).putInt(4).result)
 
-      def encode(c: Charset) = data
+      def encode(c: Charset) = bytes
 
     }
 
     sealed abstract class NonEmpty(typ: Byte) extends FrontendMessage {
 
-      final def encode(c: Charset) = {
-        val content = encodeContent(c)
-        ByteString.newBuilder.
-          putByte(typ).
-          putInt(content.length + 4).
-          append(content).
-          result
-      }
+      final def encode(c: Charset) = ByteString(typ) ++
+        ByteString.newBuilder.append(encodeContent(c)).prependLength
 
       protected def encodeContent(c: Charset): ByteString
 
@@ -254,13 +260,20 @@ package protocol {
 
   case class CancelRequest(processId: ProcessID, secretKey: SecretKey) extends FrontendMessage {
 
-    private val prefix = ByteString.newBuilder.putInt(16).putInt(80877102).result
+    import CancelRequest._
 
-    def encode(c: Charset) = prefix ++
+    def encode(c: Charset) = Prefix ++
       ByteString.newBuilder.
         putInt(processId).
         putInt(secretKey).
         result
+
+  }
+
+  object CancelRequest {
+
+    private[protocol] val Prefix =
+      ByteString.newBuilder.putInt(16).putInt(80877102).result
 
   }
 
@@ -570,15 +583,8 @@ package protocol {
 
   }
 
-  case object SSLRequest extends FrontendMessage {
-
-    private val data =
-      ByteString.newBuilder.
-        putInt(8). // total size
-        putInt(80877103).
-        result
-
-    def encode(c: Charset) = data
+  // Like StartupMessage, this has no type byte
+  case object SSLRequest extends FrontendMessage.Empty(ByteString.newBuilder.putInt(80877103).prependLength) {
 
     sealed trait Reply
 
@@ -599,23 +605,27 @@ package protocol {
 
   }
 
-  case class StartupMessage(user: String, parameters: Map[String, String]) extends FrontendMessage {
+  // Can't extend FrontentMessage.NonEmpty since there is no message type byte
+  case class StartupMessage(user: String, parameters: immutable.Map[String, String]) extends FrontendMessage {
 
-    private val userParam = "user"
+    import StartupMessage._
 
     def encode(c: Charset) =
-      ByteString.newBuilder.
-        putInt(196608). // version 3.0
-        putCString(userParam, c).
-        putCString(user, c).
-        append(parameters.filterKeys(_ != userParam).foldLeft(ByteString.newBuilder) {
+      parameters.+(User -> user). // Override any "user" parameter
+        foldLeft(ByteString.newBuilder.append(Version)) {
           case (b, (k, v)) =>
-            b.putCString(k, c).
-              putCString(v, c)
-        }.result).
+              b.putCString(k, c).
+                putCString(v, c)
+        }.
         putNUL.
-        prependLength.
-        result
+        prependLength
+
+  }
+
+  object StartupMessage {
+
+    private val Version = ByteString.newBuilder.putInt(196608).result // 3.0
+    private val User = "user"
 
   }
 
@@ -747,7 +757,7 @@ package protocol {
     case object Text extends Format(0)
     case object Binary extends Format(1)
 
-    def decode(typ: Short) = typ match {
+    def decode(typ: Short) = (typ: @switch) match {
       case 0 => Text
       case 1 => Binary
       case _ => throw UnsupportedFormatType(typ)
@@ -803,32 +813,22 @@ package protocol {
 
       import MD5._
 
+      // Encoded bytes must be in lower case
       def encode(c: Charset) = {
         val md = MessageDigest.getInstance("MD5")
         md.update(password.getBytes(c))
         md.update(username.getBytes(c))
-        md.update(md.digest().toHex)
+        md.update(md.digest().asHex.toArray)
         md.update(salt.toArray)
-        ByteString.newBuilder.
-          append(md5).
-          putBytes(md.digest().toHex).
-          putNUL.
-          result
+        Prefix ++ md.digest().asHex ++ Suffix
       }
 
     }
 
     object MD5 {
 
-      private val md5 = ByteString("md5")
-      private val hexBytes = (('0' to '9') ++ ('a' to 'f')).map(_.toByte)
-
-      // This isn't very efficient, but it's only used during login
-      private implicit class RichArray(val a: Array[Byte]) extends AnyVal {
-        def toHex: Array[Byte] = a.map(_ & 0xff).flatMap { c =>
-          Array(c >> 4, c & 0xf).map(hexBytes.apply)
-        }
-      }
+      private val Prefix = ByteString("md5")
+      private val Suffix = ByteString(NUL)
 
     }
 

@@ -25,23 +25,12 @@ import akka.util.ByteString
  */
 trait DefaultEncoders {
 
+  import DefaultEncoders.Constants._
   import scala.language.implicitConversions
 
   type Encoder[T] = Option[T] => Parameter
 
   implicit def encodeParameter[T](t: T)(implicit e: Encoder[T]): Parameter = e(Option(t))
-
-  private val UTC = java.util.TimeZone.getTimeZone("UTC")
-  private val True = ByteString("t")
-  private val False = ByteString("f")
-  private val HexPrefix = ByteString("\\x")
-  private val HexChunks = 0.to(255).map("%02x".format(_).toUpperCase).map(ByteString(_))
-  // FIXME Does the date format need to match a connection-specific parameter?
-  private val NullDate = Parameter(ByteString("0000-00-00"))
-
-  private implicit class RichByte(b: Byte) {
-    @inline def toHex: ByteString = HexChunks(b & 0xFF)
-  }
 
   object Nullable {
 
@@ -74,10 +63,10 @@ trait DefaultEncoders {
     Nullable { if (_) True else False }
 
   implicit val ByteArrayEncoder: Encoder[Array[Byte]] =
-    Nullable { _.foldLeft(HexPrefix)(_ ++ _.toHex) }
+    Nullable { _.foldLeft(HexPrefix)(_ ++ _.asHex) }
 
   implicit val ByteEncoder: Encoder[Byte] =
-    Nullable { HexPrefix ++ _.toHex }
+    Nullable { HexPrefix ++ _.asHex }
 
   implicit val CharEncoder: Encoder[Char] =
     LazyToStringEncoder
@@ -86,7 +75,7 @@ trait DefaultEncoders {
   // TODO Add implicit date formatter driven by connection parameters?
   implicit val DateEncoder: Encoder[java.util.Date] =
     Nullable(NullDate) {
-      val sdf = new SimpleDateFormat("yyyy-MM-dd")
+      val sdf = new SimpleDateFormat(DateFormat)
       sdf.setTimeZone(UTC)
       sdf.format(_).getBytes(_)
     }
@@ -108,4 +97,18 @@ trait DefaultEncoders {
 
 }
 
-object DefaultEncoders extends DefaultEncoders
+object DefaultEncoders extends DefaultEncoders {
+
+  private[protocol] object Constants {
+
+    val DateFormat = "yyyy-MM-dd"
+    val UTC = java.util.TimeZone.getTimeZone("UTC")
+    val True = ByteString("t")
+    val False = ByteString("f")
+    val HexPrefix = ByteString("\\x")
+    // FIXME Does the date format need to match a connection-specific parameter?
+    val NullDate = Parameter(ByteString("0000-00-00"))
+
+  }
+
+}

@@ -29,89 +29,94 @@ class DefaultDecodersSpec extends WordSpec with Matchers with DefaultDecoders {
 
   val charset = Charset.forName("UTF-8")
 
-  private def column(s: String) = Column(Some(ByteString(s)), charset)
-
   "Implicit decoders" should {
 
     "decode a string" in {
 
-      column("").as[String] shouldEqual ""
-      column("ABC").as[String] shouldEqual "ABC"
+      "" shouldDecodeTo ""
+      "ABC" shouldDecodeTo "ABC"
 
     }
 
     "decode a big decimal" in {
 
-      column("0.1").as[BigDecimal] shouldEqual BigDecimal("0.1")
+      "0.1" shouldDecodeTo BigDecimal("0.1")
 
     }
 
     "decode a big int" in {
 
-      column("0").as[BigInt] shouldEqual BigInt("0")
+      "0" shouldDecodeTo BigInt("0")
 
     }
 
     "decode a boolean" in {
 
-      column("t").as[Boolean] shouldEqual true
-      column("f").as[Boolean] shouldEqual false
+      "t" shouldDecodeTo true
+      "f" shouldDecodeTo false
 
     }
 
     "decode a byte array" in {
 
-      column("\\x01237f").as[Array[Byte]] shouldEqual Array[Byte](0x1, 0x23, 0x7F)
+      "\\x01237f" shouldDecodeTo Array[Byte](0x1, 0x23, 0x7F)
 
     }
 
     "decode a byte" in {
 
-      column("\\xFF").as[Byte] shouldEqual 255.toByte
+      "\\xFF" shouldDecodeTo 0xFF.toByte
 
     }
 
     "decode a char" in {
 
-      column(" ").as[Char] shouldEqual ' '
+      " " shouldDecodeTo ' '
 
     }
 
     "decode a date" in {
 
-      column("1970-01-01").as[java.util.Date] shouldEqual new java.util.Date(0)
+      "1970-01-01" shouldDecodeTo new java.util.Date(0)
 
     }
 
     "decode a double" in {
 
-      column("0.1").as[Double] shouldEqual 0.1d
+      "0.1" shouldDecodeTo 0.1d
 
     }
 
     "decode a float" in {
 
-      column("0.1").as[Float] shouldEqual 0.1f
+      "0.1" shouldDecodeTo 0.1f
 
     }
 
     "decode an int" in {
 
-      column("0").as[Int] shouldEqual 0
+      "0" shouldDecodeTo 0
 
     }
 
     "decode a long" in {
 
-      column("0").as[Long] shouldEqual 0L
+      "0" shouldDecodeTo 0L
 
     }
 
     "decode a short" in {
 
-      column("0").as[Short] shouldEqual 0.toShort
+      "0" shouldDecodeTo 0.toShort
 
     }
+
+  }
+
+  implicit class RichString(s: String) {
+
+    def shouldDecodeTo[T](right: T)(implicit d: Decoder[T]): T =
+      Column(Some(ByteString(s)), charset).as[T]
 
   }
 
