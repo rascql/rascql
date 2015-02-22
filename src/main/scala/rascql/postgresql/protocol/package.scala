@@ -94,7 +94,7 @@ package object protocol {
       val size = ByteString.newBuilder.putShort(s.size).result
       val (formats, values) = s.unzip { p => p.format.toShort -> p.encode(c) }
       size ++
-        formats.foldLeft(ByteString.newBuilder)((b, f) => b.putShort(f)).result ++
+        formats.foldLeft(ByteString.newBuilder)(_.putShort(_)).result ++
         values.foldLeft(size)(_ ++ _)
     }
   }
@@ -111,14 +111,14 @@ package protocol {
 
   object FrontendMessage {
 
-    sealed abstract class Empty(bytes: ByteString) extends FrontendMessage {
-
-      def this(typ: Char) =
-        this(ByteString.newBuilder.putByte(typ.toByte).putInt(4).result)
+    sealed abstract class Fixed(private val bytes: ByteString) extends FrontendMessage {
 
       def encode(c: Charset) = bytes
 
     }
+
+    sealed abstract class Empty(typ: Char)
+      extends FrontendMessage.Fixed(ByteString.newBuilder.putByte(typ.toByte).putInt(4).result)
 
     sealed abstract class NonEmpty(typ: Byte) extends FrontendMessage {
 
@@ -258,17 +258,9 @@ package protocol {
 
   case object BindComplete extends BackendMessage.Empty
 
-  case class CancelRequest(processId: ProcessID, secretKey: SecretKey) extends FrontendMessage {
-
-    import CancelRequest._
-
-    def encode(c: Charset) = Prefix ++
-      ByteString.newBuilder.
-        putInt(processId).
-        putInt(secretKey).
-        result
-
-  }
+  case class CancelRequest(processId: ProcessID, secretKey: SecretKey)
+    extends FrontendMessage.Fixed(CancelRequest.Prefix ++
+      ByteString.newBuilder.putInt(processId).putInt(secretKey).result)
 
   object CancelRequest {
 
@@ -584,7 +576,8 @@ package protocol {
   }
 
   // Like StartupMessage, this has no type byte
-  case object SSLRequest extends FrontendMessage.Empty(ByteString.newBuilder.putInt(80877103).prependLength) {
+  case object SSLRequest
+    extends FrontendMessage.Fixed(ByteString.newBuilder.putInt(80877103).prependLength) {
 
     sealed trait Reply
 
