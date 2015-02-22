@@ -111,9 +111,17 @@ package protocol {
 
   object FrontendMessage {
 
+    import scala.language.implicitConversions
+
     sealed abstract class Fixed(private val bytes: ByteString) extends FrontendMessage {
 
       def encode(c: Charset) = bytes
+
+    }
+
+    object Fixed {
+
+      implicit def toByteString(f: Fixed): ByteString = f.bytes
 
     }
 
@@ -126,6 +134,13 @@ package protocol {
         ByteString.newBuilder.append(encodeContent(c)).prependLength
 
       protected def encodeContent(c: Charset): ByteString
+
+    }
+
+    object NonEmpty {
+
+      implicit def toByteString(m: NonEmpty)(implicit c: Charset): ByteString =
+        m.encode(c)
 
     }
 
