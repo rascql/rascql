@@ -43,29 +43,16 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   val Array(username, password) = args
 
   import OperationAttributes._
-  import FlowGraphImplicits._
+  import FlowGraph.Implicits._
 
-  // Authentication flow begins with startup message and then continues until an error is received or AuthOk
-  val login = Flow() { implicit b =>
-    val in = UndefinedSource[BackendMessage]
-    val out = UndefinedSink[FrontendMessage]
-    val merge = Merge[FrontendMessage]
-    val auth = Flow[BackendMessage].section(name("authenticator")) {
-      _.transform(() => AuthenticationStage(username, password))
-    }
-    val startup = Source.single(StartupMessage(
-      user = username,
-      parameters = Map(
-        "database" -> username,
-        "application_name" -> "rascql-demo",
-        "client_encoding" -> charset.name()
-      )
-    ))
+  val decoder = Flow[ByteString].section(name("decoder")) {
+    _.transform(() => DecoderStage(bulkDecoder)).
+      transform(() => LoggingStage("Decoder"))
+  }
 
-    startup ~> merge
-    in ~> auth ~> merge ~> out
-
-    in -> out
+  val encoder = Flow[FrontendMessage].section(name("encoder")) {
+    _.transform(() => LoggingStage("Encoder")).
+      map(_.encode(charset))
   }
 
   val query = Source.single(List(
@@ -84,52 +71,54 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val close = Source.single(List(Terminate))
 
+  // Authentication flow begins with startup message and then continues until an error is received or AuthOk
+  val login = Flow() { implicit b =>
+    val merge = b.add(Merge[FrontendMessage](2))
+    val auth = b.add(Flow[BackendMessage].section(name("authentication")) {
+      _.transform(() => AuthenticationStage(username, password))
+    })
+    val startup = b.add(Source.single[FrontendMessage](StartupMessage(
+      user = username,
+      parameters = Map(
+        "database" -> username,
+        "application_name" -> "rascql-demo",
+        "client_encoding" -> charset.name()
+      )
+    )))
+
+    startup ~> merge
+    auth ~> merge
+
+    (auth.inlet, merge.out)
+  }
+
   val flow = Flow() { implicit b =>
-    val merge = Merge[FrontendMessage]
-    val bcastIn = Broadcast[BackendMessage]
-    val bcastOut = Broadcast[(Source[_], List[FrontendMessage])]
-    val backend = UndefinedSource[BackendMessage]
-    val frontend = UndefinedSink[FrontendMessage]
+    val merge = b.add(Merge[FrontendMessage](2))
+    val bcast = b.add(Broadcast[BackendMessage](2))
     val rfq = Flow[BackendMessage].section(name("ready-for-query")) {
       _.splitWhen(_.isInstanceOf[ReadyForQuery])
     }
-    val zipper = Zip[Source[_], List[FrontendMessage]]
-    val unzipper = Flow[(Source[_], List[FrontendMessage])]
+    val zip = b.add(Zip[Source[BackendMessage, Unit], List[FrontendMessage]]())
+    val unzip = b.add(Unzip[Source[BackendMessage, Unit], List[FrontendMessage]]())
 
     // Zip each query chunk with the ReadyForQuery message, so messages are
     // sent when the server is ready for them.
 
-    backend ~> bcastIn ~> login ~> merge ~> frontend
-               bcastIn ~> rfq ~> zipper.left
-    query.concat(preparedStatement).concat(close) ~> zipper.right
-    zipper.out ~> bcastOut ~> unzipper.mapConcat(_._2) ~> merge
-                  bcastOut ~> unzipper.map(_._1).flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
+    bcast ~> login ~> merge
+    bcast ~> rfq ~> zip.in0
+    query.concat(preparedStatement).concat(close) ~> zip.in1
+    zip.out ~> unzip.in
+    unzip.out0.flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
+    unzip.out1.mapConcat(identity) ~> merge
 
-    backend -> frontend
-  }
-
-  val codec = Flow() { implicit b =>
-    val decoder = Flow[ByteString].section(name("decoder")) {
-      _.transform(() => DecoderStage(bulkDecoder)).
-        transform(() => LoggingStage("Decoder"))
-    }
-    val encoder = Flow[FrontendMessage].section(name("encoder")) {
-      _.transform(() => LoggingStage("Encoder")).
-        map(_.encode(charset))
-    }
-    val inbound = UndefinedSource[ByteString]
-    val outbound = UndefinedSink[ByteString]
-
-    inbound ~> decoder ~> flow ~> encoder ~> outbound
-
-    inbound -> outbound
+    (bcast.in, merge.out)
   }
 
   val conn = StreamTcp().outgoingConnection(
     remoteAddress = new InetSocketAddress("localhost", 5432),
     connectTimeout = 1.second)
 
-  conn.handleWith(codec)
+  decoder.via(flow).via(encoder).join(conn).run()
 
   // FIXME Disconnect and stop actor system when queries complete
 
