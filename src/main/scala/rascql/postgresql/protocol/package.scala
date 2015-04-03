@@ -300,28 +300,15 @@ package protocol {
 
     // TODO Use a Try to avoid exceptions/invalid data
     def decode(c: Charset, b: ByteIterator) = {
-      val raw = b.getCString(c)
-      val (Array(name), args) = raw.split(" ").splitAt(1)
-      val tag = (name -> args.map(_.toInt)) match {
-        case ("INSERT", Array(oid, rows)) =>
+      CommandComplete(b.getCString(c).split(' ') match {
+        case Array(name, oid, rows) =>
           // TODO Verify large unsigned OID parses properly
-          Insert(oid, rows)
-        case ("DELETE", Array(rows)) => Delete(rows.toInt)
-        case ("UPDATE", Array(rows)) => Update(rows.toInt)
-        case ("SELECT", Array(rows)) => Select(rows.toInt)
-        case ("MOVE", Array(rows)) => Move(rows.toInt)
-        case ("FETCH", Array(rows)) => Fetch(rows.toInt)
-        case ("COPY", Array(rows)) => Copy(Some(rows.toInt)) // 8.2 and later
-        case ("COPY", _) => Copy(None) // Pre-8.2
-        case ("BEGIN", _) => Begin
-        case ("ROLLBACK", _) => Rollback
-        case ("COMMIT", _) => Commit
-        case _ => Unknown(raw)
-      }
-      // Expect row count (require PostgreSQL 8.2 or later for copy command)
-      CommandComplete(tag)
-      //    val rows = Try(it.next().toInt)
-      //    CommandComplete(tag, rows.getOrElse(0))
+          OIDWithRows(name, oid.toInt, rows.toInt)
+        case Array(name, rows) =>
+          RowsAffected(name, rows.toInt)
+        case Array(name) =>
+          NameOnly(name)
+      })
     }
 
   }
@@ -687,17 +674,9 @@ package protocol {
   object CommandTag {
 
     // FIXME Should the rows count be a long?
-    case class Insert(oid: OID, rows: Int) extends CommandTag // FIXME oid is an unsigned int
-    case class Delete(rows: Int) extends CommandTag
-    case class Update(rows: Int) extends CommandTag
-    case class Select(rows: Int) extends CommandTag
-    case class Move(rows: Int) extends CommandTag
-    case class Fetch(rows: Int) extends CommandTag
-    case class Copy(rows: Option[Int]) extends CommandTag // Pre-8.2, row count unavailable
-    case object Begin extends CommandTag
-    case object Commit extends CommandTag
-    case object Rollback extends CommandTag
-    case class Unknown(raw: String) extends CommandTag
+    case class OIDWithRows(name: String, oid: OID, rows: Int) extends CommandTag
+    case class RowsAffected(name: String, rows: Int) extends CommandTag
+    case class NameOnly(name: String) extends CommandTag
 
   }
 
