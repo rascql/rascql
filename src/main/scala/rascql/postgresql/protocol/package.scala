@@ -218,7 +218,7 @@ package protocol {
 
   }
 
-  sealed abstract class AuthenticationRequest extends BackendMessage
+  sealed trait AuthenticationRequest extends BackendMessage
 
   object AuthenticationRequest extends Decoder {
 
