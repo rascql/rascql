@@ -54,7 +54,7 @@ trait DefaultDecoders {
   implicit val StringDecoder: Decoder[String] =
     Decoder { (b, c) => new String(b.toArray, c) }
 
-  protected object FromStringDecoder {
+  object TextDecoder {
 
     def apply[T](fn: String => T): Decoder[T] =
       StringDecoder.andThen(_.map(fn))
@@ -62,57 +62,50 @@ trait DefaultDecoders {
   }
 
   implicit val BigDecimalDecoder: Decoder[BigDecimal] =
-    FromStringDecoder { BigDecimal(_) }
+    TextDecoder { BigDecimal(_) }
 
   implicit val BigIntDecoder: Decoder[BigInt] =
-    FromStringDecoder { BigInt(_) }
+    TextDecoder { BigInt(_) }
 
   implicit val BooleanDecoder: Decoder[Boolean] =
     Decoder { _ == True }
 
-  implicit val BytesDecoder: Decoder[Array[Byte]] =
-    FromStringDecoder {
+  implicit val ByteArrayDecoder: Decoder[Array[Byte]] =
+    TextDecoder {
       _.stripPrefix("\\x").
         grouped(2).
         map(java.lang.Integer.parseInt(_, 16).toByte).
         toArray
     }
 
-  protected object FromBytesDecoder {
-
-    def apply[T](fn: Array[Byte] => T): Decoder[T] =
-      BytesDecoder.andThen(_.map(fn))
-
-  }
-
   implicit val ByteDecoder: Decoder[Byte] =
-    FromBytesDecoder { _.head } // FIXME Fail if more than one byte
+    ByteArrayDecoder.andThen(_.map(_.head)) // FIXME Fail if more than one byte
 
   implicit val CharDecoder: Decoder[Char] =
-    FromStringDecoder { _.head } // FIXME Fail if more than one character
+    TextDecoder { _.head } // FIXME Fail if more than one character
 
   // FIXME Poor performance
   implicit val DateDecoder: Decoder[java.util.Date] =
-    FromStringDecoder {
+    TextDecoder {
       val sdf = new SimpleDateFormat("yyyy-MM-dd")
       sdf.setTimeZone(UTC)
       sdf.parse(_)
     }
 
   implicit val DoubleDecoder: Decoder[Double] =
-    FromStringDecoder { _.toDouble }
+    TextDecoder { _.toDouble }
 
   implicit val FloatDecoder: Decoder[Float] =
-    FromStringDecoder { _.toFloat }
+    TextDecoder { _.toFloat }
 
   implicit val IntDecoder: Decoder[Int] =
-    FromStringDecoder { _.toInt }
+    TextDecoder { _.toInt }
 
   implicit val LongDecoder: Decoder[Long] =
-    FromStringDecoder { _.toLong }
+    TextDecoder { _.toLong }
 
   implicit val ShortDecoder: Decoder[Short] =
-    FromStringDecoder { _.toShort }
+    TextDecoder { _.toShort }
 
   // TODO Add Decoder[T] to Decoder[Option[T]] and other conversions?
 

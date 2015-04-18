@@ -50,14 +50,14 @@ trait DefaultEncoders {
     Nullable { _.getBytes(_) }
 
   // Defer string conversion until encoded form is requested
-  def LazyToStringEncoder[T]: Encoder[T] =
+  def LazyTextEncoder[T]: Encoder[T] =
     Nullable { _.toString.getBytes(_) }
 
   implicit val BigDecimalEncoder: Encoder[BigDecimal] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val BigIntEncoder: Encoder[BigInt] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val BooleanEncoder: Encoder[Boolean] =
     Nullable { if (_) True else False }
@@ -69,7 +69,7 @@ trait DefaultEncoders {
     Nullable { HexPrefix ++ _.asHex }
 
   implicit val CharEncoder: Encoder[Char] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   // FIXME Inefficient due to creation of SDF
   // TODO Add implicit date formatter driven by connection parameters?
@@ -81,19 +81,19 @@ trait DefaultEncoders {
     }
 
   implicit val DoubleEncoder: Encoder[Double] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val FloatEncoder: Encoder[Float] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val IntEncoder: Encoder[Int] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val LongEncoder: Encoder[Long] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
   implicit val ShortEncoder: Encoder[Short] =
-    LazyToStringEncoder
+    LazyTextEncoder
 
 }
 
