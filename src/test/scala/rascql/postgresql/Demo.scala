@@ -16,11 +16,8 @@
 
 package rascql.postgresql
 
-import java.net.InetSocketAddress
 import java.nio.charset.Charset
-import scala.concurrent.duration._
 import akka.actor.ActorSystem
-import akka.event.Logging
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.util.ByteString
@@ -42,18 +39,15 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val Array(username, password) = args
 
-  import OperationAttributes._
   import FlowGraph.Implicits._
 
-  val decoder = Flow[ByteString].section(name("decoder")) {
-    _.transform(() => DecoderStage(bulkDecoder)).
-      transform(() => LoggingStage("Decoder"))
-  }
+  val decoder = Flow[ByteString].named("decoder").
+    transform(() => DecoderStage(bulkDecoder)).
+    transform(() => LoggingStage("Decoder"))
 
-  val encoder = Flow[FrontendMessage].section(name("encoder")) {
-    _.transform(() => LoggingStage("Encoder")).
-      map(_.encode(charset))
-  }
+  val encoder = Flow[FrontendMessage].named("encoder").
+    transform(() => LoggingStage("Encoder")).
+    map(_.encode(charset))
 
   val query = Source.single(List(
     """BEGIN;
@@ -74,9 +68,8 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   // Authentication flow begins with startup message and then continues until an error is received or AuthOk
   val login = Flow() { implicit b =>
     val merge = b.add(Merge[FrontendMessage](2))
-    val auth = b.add(Flow[BackendMessage].section(name("authentication")) {
-      _.transform(() => AuthenticationStage(username, password))
-    })
+    val auth = b.add(Flow[BackendMessage].named("authentication").
+      transform(() => AuthenticationStage(username, password)))
     val startup = b.add(Source.single[FrontendMessage](StartupMessage(
       user = username,
       parameters = Map(
@@ -95,9 +88,8 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   val flow = Flow() { implicit b =>
     val merge = b.add(Merge[FrontendMessage](2))
     val bcast = b.add(Broadcast[BackendMessage](2))
-    val rfq = Flow[BackendMessage].section(name("ready-for-query")) {
-      _.splitWhen(_.isInstanceOf[ReadyForQuery])
-    }
+    val rfq = Flow[BackendMessage].named("ready-for-query").
+      splitWhen(_.isInstanceOf[ReadyForQuery])
     val zip = b.add(Zip[Source[BackendMessage, Unit], List[FrontendMessage]]())
     val unzip = b.add(Unzip[Source[BackendMessage, Unit], List[FrontendMessage]]())
 
@@ -114,9 +106,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
     (bcast.in, merge.out)
   }
 
-  val conn = StreamTcp().outgoingConnection(
-    remoteAddress = new InetSocketAddress("localhost", 5432),
-    connectTimeout = 1.second)
+  val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
 
   decoder.via(flow).via(encoder).join(conn).run()
 
