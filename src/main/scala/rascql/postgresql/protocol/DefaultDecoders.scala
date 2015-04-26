@@ -87,7 +87,7 @@ trait DefaultDecoders {
   // FIXME Poor performance
   implicit val DateDecoder: Decoder[java.util.Date] =
     TextDecoder {
-      val sdf = new SimpleDateFormat("yyyy-MM-dd")
+      val sdf = new SimpleDateFormat(DateFormat)
       sdf.setTimeZone(UTC)
       sdf.parse(_)
     }
