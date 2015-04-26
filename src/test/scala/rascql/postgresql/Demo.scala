@@ -43,10 +43,10 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val decoder = Flow[ByteString].named("decoder").
     transform(() => DecoderStage(bulkDecoder)).
-    transform(() => LoggingStage("Decoder"))
+    log("Decoder")
 
   val encoder = Flow[FrontendMessage].named("encoder").
-    transform(() => LoggingStage("Encoder")).
+    log("Encoder").
     map(_.encode(charset))
 
   val query = Source.single(List(
