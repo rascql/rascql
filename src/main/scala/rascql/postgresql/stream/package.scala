@@ -16,10 +16,27 @@
 
 package rascql.postgresql
 
+import scala.collection.immutable
 import scala.util.control.NoStackTrace
 import rascql.postgresql.protocol._
 
 package stream {
+
+  sealed trait SendQuery
+
+  object SendQuery {
+
+    def apply(s: String): SendQuery = SendSimpleQuery(s)
+
+    def Prepared(s: String, p: Parameter*): SendQuery = Prepared(s, p.toList)
+
+    def Prepared(s: String, p: Iterable[Parameter]): SendQuery = SendExtendedQuery(s, p.toList)
+
+  }
+
+  private[stream] case class SendSimpleQuery(statement: String) extends SendQuery
+
+  private[stream] case class SendExtendedQuery(statement: String, parameters: immutable.Seq[Parameter]) extends SendQuery
 
   sealed abstract class StreamException(msg: String)
     extends RuntimeException(msg) with NoStackTrace

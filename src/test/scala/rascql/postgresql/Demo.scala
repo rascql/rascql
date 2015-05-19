@@ -39,21 +39,18 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   import FlowGraph.Implicits._
 
-  val query = Source.single(List(
-    """BEGIN;
-      |SELECT usename FROM pg_stat_activity;
-      |COMMIT""".stripMargin
-  ).map(Query.apply))
-
-  val preparedStatement = Source.single(List(
-    Parse("SELECT usename FROM pg_stat_activity WHERE usename = $1 LIMIT $2"),
-    Bind(Seq(username, 1)),
-    Describe(PreparedStatement.Unnamed),
-    Execute(Portal.Unnamed),
-    Sync
+  val queries = Source(List(
+    SendQuery(
+      """BEGIN;
+        |SELECT usename FROM pg_stat_activity;
+        |COMMIT""".stripMargin
+    ),
+    SendQuery.Prepared(
+      "SELECT usename FROM pg_stat_activity WHERE usename = $1 LIMIT $2",
+      username,
+      1
+    )
   ))
-
-  val close = Source.single(List(Terminate))
 
   val startup = Startup(username, password, Map(
     "database" -> username,
@@ -65,18 +62,19 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
     val rollover = b.add(Rollover[BackendMessage]())
     val rfq = Flow[BackendMessage].named("ready-for-query").
       splitWhen(_.isInstanceOf[ReadyForQuery])
-    val zip = b.add(Zip[Source[BackendMessage, Unit], List[FrontendMessage]]())
-    val unzip = b.add(Unzip[Source[BackendMessage, Unit], List[FrontendMessage]]())
+    val zip = b.add(Zip[Source[BackendMessage, Unit], SendQuery]())
+    val unzip = b.add(Unzip[Source[BackendMessage, Unit], SendQuery]())
+    val stmts = b.add(Flow[SendQuery].transform(() => new SendQueryStage))
 
     // Zip each query chunk with the ReadyForQuery message, so messages are
     // sent when the server is ready for them.
 
     rollover ~> startup ~> concat
     rollover ~> rfq ~> zip.in0
-    query.concat(preparedStatement).concat(close) ~> zip.in1
+    queries ~> zip.in1
     zip.out ~> unzip.in
     unzip.out0.flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
-    unzip.out1.mapConcat(identity) ~> concat
+    unzip.out1 ~> stmts ~> concat
 
     (rollover.in, concat.out)
   }
