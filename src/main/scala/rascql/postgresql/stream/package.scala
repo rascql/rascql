@@ -25,6 +25,10 @@ package stream {
     extends RuntimeException(msg) with NoStackTrace
 
   @SerialVersionUID(1)
+  case class BackendMessageTooLarge(typ: Byte, length: Int, limit: Int)
+    extends StreamException(s"Backend message type ${Integer.toHexString(typ)} with length $length exceeds maximum of $limit bytes")
+
+  @SerialVersionUID(1)
   case class UnsupportedAuthenticationRequest(request: AuthenticationRequest)
     extends StreamException(s"Authentication request ${request.getClass.getSimpleName} is not supported")
 

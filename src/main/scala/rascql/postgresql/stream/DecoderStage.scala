@@ -16,6 +16,7 @@
 
 package rascql.postgresql.stream
 
+import java.nio.charset.Charset
 import akka.stream.stage._
 import akka.util.ByteString
 import rascql.postgresql.protocol._
@@ -25,20 +26,39 @@ import rascql.postgresql.protocol._
  *
  * @author Philip L. McMahon
  */
-case class DecoderStage(d: BulkDecoder) extends StatefulStage[ByteString, BackendMessage] {
+class DecoderStage(charset: Charset, maxMessageLength: Int)
+  extends PushPullStage[ByteString, BackendMessage] {
 
-  def initial = new StageState[ByteString, BackendMessage] {
+  import Decoder._
 
-      var buffered = ByteString.empty
+  var buffer = ByteString.empty
 
-      override def onPush(b: ByteString, ctx: Context[BackendMessage]) =
-        d.decode(b.concat(buffered)) match {
-          case BulkDecoder.Result(messages, remainder) =>
-            buffered = remainder.compact
-            if (messages.nonEmpty) emit(messages.iterator, ctx)
-            else ctx.pull() // Need more data
-        }
+  def onPush(bytes: ByteString, ctx: Context[BackendMessage]) =
+    tryDecode(buffer ++ bytes, ctx)
 
+  // This will try to decode message header multiple times if not enough data is available
+  def tryDecode(bytes: ByteString, ctx: Context[BackendMessage]) =
+    if (bytes.isEmpty) pullOrFinish(ctx)
+    else {
+      Decoder(bytes.head).decode(charset, bytes.tail) match {
+        case NeedBytes(minimum) =>
+          val required = buffer.length + minimum
+          if (required > maxMessageLength)
+            ctx.fail(BackendMessageTooLarge(bytes.head, required, maxMessageLength))
+          else
+            pullOrFinish(ctx)
+        case MessageDecoded(msg, rest) =>
+          buffer = rest
+          ctx.push(msg)
+      }
     }
+
+  def onPull(ctx: Context[BackendMessage]) = tryDecode(buffer, ctx)
+
+  def pullOrFinish(ctx: Context[BackendMessage]) =
+    if (ctx.isFinishing) ctx.finish() else ctx.pull()
+
+  override def onUpstreamFinish(ctx: Context[BackendMessage]) =
+    if (buffer.isEmpty) ctx.finish() else ctx.absorbTermination()
 
 }
