@@ -112,6 +112,10 @@ package object protocol {
     }
   }
 
+}
+
+package protocol {
+
   sealed trait FrontendMessage {
 
     def encode(c: Charset): ByteString
