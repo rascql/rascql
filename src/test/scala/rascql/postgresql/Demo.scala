@@ -20,7 +20,6 @@ import java.nio.charset.Charset
 import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.scaladsl._
-import akka.util.ByteString
 import rascql.postgresql.protocol._
 import rascql.postgresql.stream._
 
@@ -56,29 +55,14 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val close = Source.single(List(Terminate))
 
-  // Authentication flow begins with startup message and then continues until an error is received or AuthOk
-  val login = Flow() { implicit b =>
-    val merge = b.add(Merge[FrontendMessage](2))
-    val auth = b.add(Flow[BackendMessage].named("authentication").
-      transform(() => AuthenticationStage(username, password)))
-    val startup = b.add(Source.single[FrontendMessage](StartupMessage(
-      user = username,
-      parameters = Map(
-        "database" -> username,
-        "application_name" -> "rascql-demo",
-        "client_encoding" -> charset.name()
-      )
-    )))
-
-    startup ~> merge
-    auth ~> merge
-
-    (auth.inlet, merge.out)
-  }
+  val startup = Startup(username, password, Map(
+    "database" -> username,
+    "application_name" -> "rascql-demo"
+  ))
 
   val flow = Flow() { implicit b =>
-    val merge = b.add(Merge[FrontendMessage](2))
-    val bcast = b.add(Broadcast[BackendMessage](2))
+    val concat = b.add(Concat[FrontendMessage]())
+    val rollover = b.add(Rollover[BackendMessage]())
     val rfq = Flow[BackendMessage].named("ready-for-query").
       splitWhen(_.isInstanceOf[ReadyForQuery])
     val zip = b.add(Zip[Source[BackendMessage, Unit], List[FrontendMessage]]())
@@ -87,14 +71,14 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
     // Zip each query chunk with the ReadyForQuery message, so messages are
     // sent when the server is ready for them.
 
-    bcast ~> login ~> merge
-    bcast ~> rfq ~> zip.in0
+    rollover ~> startup ~> concat
+    rollover ~> rfq ~> zip.in0
     query.concat(preparedStatement).concat(close) ~> zip.in1
     zip.out ~> unzip.in
     unzip.out0.flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
-    unzip.out1.mapConcat(identity) ~> merge
+    unzip.out1.mapConcat(identity) ~> concat
 
-    (bcast.in, merge.out)
+    (rollover.in, concat.out)
   }
 
   val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
