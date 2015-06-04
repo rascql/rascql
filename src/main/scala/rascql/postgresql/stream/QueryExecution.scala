@@ -21,37 +21,59 @@ import akka.stream.scaladsl._
 import rascql.postgresql.protocol._
 
 /**
- * Executes simple and extended (prepared) queries.
+ * Executes simple and extended (prepared) queries, backpressuring when a query
+ * is received and resuming when the server is ready for the next query.
  *
  * {{{
- *                      . . . . . . . . . . . .
- *                      .                     .
- *                      .   +-------------+   .
- *                      .   |             |   .
- *           SendQuery --> [i]  queries  [o] --> FrontendMessage
- *                      .   |             |   .
- *                      .   +-------------+   .
- *                      .                     .
- *                      .   +-------------+   .
- *                      .   |             |   .
- * Source[QueryResult] <-- [o]  results  [i] <-- BackendMessage
- *                      .   |             |   .
- *                      .   +-------------+   .
- *                      .                     .
- *                      . . . . . . . . . . . .
- * }}}
+ *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+ *                      .                                                                       .
+ *                      .                           +---------------+       +---------------+   .
+ *                      .                           |               |       |               |   .
+ *           SendQuery --------------------------> [i]     zip     [o] --> [i]   queries   [o] --> FrontendMessage
+ *                      .                           |               |       |               |   .
+ *                      .                           +------[i]------+       +---------------+   .
+ *                      .                                   ^                                   .
+ *                      .                                   |                                   .
+ *                      .                           +------[o]------+                           .
+ *                      .                           |               |                           .
+ *                      .                           |    tokens     |                           .
+ *                      .                           |               |                           .
+ *                      .                           +------[i]------+                           .
+ *                      .                                   ^                                   .
+ *                      .                                   |                                   .
+ *                      .   +---------------+       +------[o]------+                           .
+ *                      .   |               |       |               |                           .
+ * Source[QueryResult] <-- [o]   results   [i] <-- [o]  broadcast  [i] <-------------------------- BackendMessage
+ *                      .   |               |       |               |                           .
+ *                      .   +---------------+       +---------------+                           .
+ *                      .                                                                       .
+ *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
  *
  * @author Philip L. McMahon
  */
 object QueryExecution {
 
+  private case object Next
+  private type Next = Next.type
+
+  import FlowGraph.Implicits._
+
   def apply(): BidiFlow[SendQuery, FrontendMessage, BackendMessage, Source[QueryResult, Unit], Unit] =
     BidiFlow() { implicit b =>
 
+      // Don't allow executing the next statement unless we've seen the prior statement complete
+      // Match statement with a token to before processing the statement
+      val zip = b.add(ZipWith[Next, SendQuery, SendQuery] { case (_, s) => s })
+      val tokens = b.add(Flow[BackendMessage].collect { case _: ReadyForQuery => Next })
+      val broadcast = b.add(Broadcast[BackendMessage](2))
       val queries = b.add(Flow[SendQuery].transform(() => new SendQueryStage))
       val results = b.add(Flow[BackendMessage].splitWhen(_.isInstanceOf[ReadyForQuery]).map(_.transform(() => new QueryResultStage)))
 
-      BidiShape(queries, results)
+      broadcast ~> results
+      broadcast ~> tokens ~> zip.in0
+                             zip.out ~> queries
+
+      BidiShape(zip.in1, queries.outlet, broadcast.in, results.outlet)
     }
 
 }

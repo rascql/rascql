@@ -52,36 +52,26 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
     )
   ))
 
-  val startup = Startup(username, password, Map(
-    "database" -> username,
-    "application_name" -> "rascql-demo"
-  ))
-
-  val flow = Flow() { implicit b =>
+  val startup = BidiFlow() { implicit b =>
     val concat = b.add(Concat[FrontendMessage]())
     val rollover = b.add(Rollover[BackendMessage]())
-    val rfq = Flow[BackendMessage].named("ready-for-query").
-      splitWhen(_.isInstanceOf[ReadyForQuery])
-    val zip = b.add(Zip[Source[BackendMessage, Unit], SendQuery]())
-    val unzip = b.add(Unzip[Source[BackendMessage, Unit], SendQuery]())
-    val stmts = b.add(Flow[SendQuery].transform(() => new SendQueryStage))
 
     // Zip each query chunk with the ReadyForQuery message, so messages are
     // sent when the server is ready for them.
 
-    rollover ~> startup ~> concat
-    rollover ~> rfq ~> zip.in0
-    queries ~> zip.in1
-    zip.out ~> unzip.in
-    unzip.out0.flatten(FlattenStrategy.concat) ~> Sink.foreach[Any](println)
-    unzip.out1 ~> stmts ~> concat
+    rollover ~> Startup(username, password, Map(
+      "database" -> username,
+      "application_name" -> "rascql-demo"
+    )) ~> concat
 
-    (rollover.in, concat.out)
+    BidiShape(concat.in(1), concat.out, rollover.in, rollover.out(1))
   }
 
   val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
 
-  flow.join(Codec(charset)).join(conn).run()
+  val stdout = Flow[Source[QueryResult, Unit]].flatten(FlattenStrategy.concat).to(Sink.foreach(println))
+
+  QueryExecution().atop(startup).atop(Codec(charset)).join(conn).runWith(queries, stdout)
 
   // FIXME Disconnect and stop actor system when queries complete
 

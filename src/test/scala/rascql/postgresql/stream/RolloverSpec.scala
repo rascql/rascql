@@ -16,11 +16,8 @@
 
 package rascql.postgresql.stream
 
-import akka.actor.ActorSystem
 import akka.stream.scaladsl._
-import akka.stream.ActorFlowMaterializer
 import akka.stream.testkit._
-import akka.testkit.TestKit
 import org.scalatest._
 
 /**
@@ -28,13 +25,7 @@ import org.scalatest._
  *
  * @author Philip L. McMahon
  */
-class RolloverSpec(_system: ActorSystem) extends TestKit(_system) with WordSpecLike with BeforeAndAfterAll {
-
-  def this() = this(ActorSystem("RolloverSpec"))
-
-  override protected def afterAll() = system.shutdown()
-
-  implicit val materializer = ActorFlowMaterializer()
+class RolloverSpec extends StreamSpec with WordSpecLike {
 
   "A rollover" must {
 
