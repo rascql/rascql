@@ -26,7 +26,7 @@ import rascql.postgresql.protocol._
  *
  * @author Philip L. McMahon
  */
-class DecoderStage(charset: Charset)
+private[stream] class DecoderStage(charset: Charset)
   extends PushPullStage[ByteString, BackendMessage] {
 
   import Decoder._

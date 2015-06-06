@@ -40,14 +40,6 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   import FlowGraph.Implicits._
 
-  val decoder = Flow[ByteString].named("decoder").
-    transform(() => new DecoderStage(charset)).
-    log("Decoder")
-
-  val encoder = Flow[FrontendMessage].named("encoder").
-    log("Encoder").
-    map(_.encode(charset))
-
   val query = Source.single(List(
     """BEGIN;
       |SELECT usename FROM pg_stat_activity;
@@ -107,7 +99,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
 
-  decoder.via(flow).via(encoder).join(conn).run()
+  flow.join(Codec(charset)).join(conn).run()
 
   // FIXME Disconnect and stop actor system when queries complete
 
