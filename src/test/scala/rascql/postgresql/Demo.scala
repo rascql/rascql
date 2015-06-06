@@ -41,7 +41,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
   import FlowGraph.Implicits._
 
   val decoder = Flow[ByteString].named("decoder").
-    transform(() => new DecoderStage(charset, 16 * 1024 * 1024)).
+    transform(() => new DecoderStage(charset)).
     log("Decoder")
 
   val encoder = Flow[FrontendMessage].named("encoder").

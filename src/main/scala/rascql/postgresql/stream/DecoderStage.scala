@@ -26,7 +26,7 @@ import rascql.postgresql.protocol._
  *
  * @author Philip L. McMahon
  */
-class DecoderStage(charset: Charset, maxMessageLength: Int)
+class DecoderStage(charset: Charset)
   extends PushPullStage[ByteString, BackendMessage] {
 
   import Decoder._
@@ -41,12 +41,8 @@ class DecoderStage(charset: Charset, maxMessageLength: Int)
     if (bytes.isEmpty) pullOrFinish(ctx)
     else {
       Decoder(bytes.head).decode(charset, bytes.tail) match {
-        case NeedBytes(minimum) =>
-          val required = buffer.length + minimum
-          if (required > maxMessageLength)
-            ctx.fail(BackendMessageTooLarge(bytes.head, required, maxMessageLength))
-          else
-            pullOrFinish(ctx)
+        case _: NeedBytes =>
+          pullOrFinish(ctx)
         case MessageDecoded(msg, rest) =>
           buffer = rest
           ctx.push(msg)
