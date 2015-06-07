@@ -116,7 +116,7 @@ class DefaultDecodersSpec extends WordSpec with Matchers with DefaultDecoders {
   implicit class RichString(s: String) {
 
     def shouldDecodeTo[T](right: T)(implicit d: Decoder[T]): T =
-      Column(Some(ByteString(s)), charset).as[T]
+      DataRow.Column(Some(ByteString(s)), charset).as[T]
 
   }
 

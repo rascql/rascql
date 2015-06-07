@@ -29,7 +29,7 @@ package stream {
     extends StreamException(s"Authentication request ${request.getClass.getSimpleName} is not supported")
 
   @SerialVersionUID(1)
-  case class AuthenticationFailed(errors: Seq[ErrorResponse.Field])
+  case class AuthenticationFailed(errors: ErrorResponse.Fields)
     extends StreamException(s"Authentication failed (${errors.mkString(", ")})")
 
   @SerialVersionUID(1)

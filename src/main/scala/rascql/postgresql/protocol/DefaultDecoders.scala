@@ -25,6 +25,7 @@ import akka.util.ByteString
  */
 trait DefaultDecoders {
 
+  import DataRow.Column
   import DefaultEncoders.Constants._
 
   type Decoder[T] = Column => Option[T]

@@ -77,6 +77,9 @@ package object protocol {
       iter.take(n)
     }
 
+    def splitAt(n: Int): (ByteIterator, ByteIterator) =
+      b.clone.take(n) -> b.drop(n)
+
   }
 
   private[protocol] implicit class RichByteStringBuilder(val b: ByteStringBuilder) extends AnyVal {
@@ -114,7 +117,7 @@ package object protocol {
 
   sealed trait FrontendMessage {
 
-    def encode(c: Charset): ByteString
+    def encode(charset: Charset): ByteString
 
   }
 
@@ -161,69 +164,66 @@ package object protocol {
 
     trait Empty extends BackendMessage with Decoder {
 
-      def decode(c: Charset, b: ByteIterator) = this
+      protected def decodeContent(c: Charset, b: ByteIterator) = this
 
     }
 
   }
 
-  case class BulkDecoder(charset: Charset, maxMessageLength: Int) {
+  trait Decoder {
 
-    import BulkDecoder._
+    import Decoder._
 
-    def decode(bytes: ByteString): Result = {
-      var messages = Vector.empty[BackendMessage]
-      var remainder = ByteString.empty
-      val iter = bytes.iterator
-      while (iter.hasNext) {
-        val code = iter.getByte
-        val msgLength = iter.getInt
-        val contentLength = msgLength - 4 // Minus 4 bytes for int
-        if (contentLength > maxMessageLength) {
-          throw MessageTooLong(code, contentLength, maxMessageLength)
-        } else if (iter.len >= contentLength) {
-          val d = (code: @switch) match {
-            case 'R' => AuthenticationRequest
-            case 'K' => BackendKeyData
-            case '2' => BindComplete
-            case '3' => CloseComplete
-            case 'C' => CommandComplete
-            case 'd' => CopyData
-            case 'c' => CopyDone
-            case 'G' => CopyInResponse
-            case 'H' => CopyOutResponse
-            case 'W' => CopyBothResponse
-            case 'D' => DataRow
-            case 'I' => EmptyQueryResponse
-            case 'E' => ErrorResponse
-            case 'V' => FunctionCallResponse
-            case 'n' => NoData
-            case 'N' => NoticeResponse
-            case 'A' => NotificationResponse
-            case 't' => ParameterDescription
-            case 'S' => ParameterStatus
-            case '1' => ParseComplete
-            case 's' => PortalSuspended
-            case 'Z' => ReadyForQuery
-            case 'T' => RowDescription
-            case _ => throw UnsupportedMessageType(code)
-          }
-          // Consume fixed number of bytes from iterator as sub-iterator
-          messages :+= d.decode(charset, iter.nextBytes(contentLength))
-        } else {
-          // Need more data for this message
-          // Free bytes which have already been decoded and consume iterator
-          remainder = iter.toByteString // TODO compact?
+    def decode(charset: Charset, bytes: ByteString): Result =
+      if (bytes.length < 4) NeedBytes(4 - bytes.length)
+      else {
+        val iter = bytes.iterator
+        val length = iter.getInt - 4 // Drop four bytes for int
+        if (iter.len < length) NeedBytes(length - iter.len) // TODO This could be a "LengthKnown" intermediate state
+        else {
+          val (content, rest) = iter.splitAt(length)
+          MessageDecoded(decodeContent(charset, content), rest.toByteString)
         }
       }
-      Result(messages, remainder)
-    }
+
+    protected def decodeContent(c: Charset, b: ByteIterator): BackendMessage
 
   }
 
-  object BulkDecoder {
+  object Decoder {
 
-    case class Result(messages: immutable.Seq[BackendMessage], remainder: ByteString)
+    sealed trait Result
+
+    case class NeedBytes(count: Int) extends Result
+
+    case class MessageDecoded(message: BackendMessage, tail: ByteString) extends Result
+
+    def apply(code: Byte): Decoder = (code: @switch) match {
+      case 'R' => AuthenticationRequest
+      case 'K' => BackendKeyData
+      case '2' => BindComplete
+      case '3' => CloseComplete
+      case 'C' => CommandComplete
+      case 'd' => CopyData
+      case 'c' => CopyDone
+      case 'G' => CopyInResponse
+      case 'H' => CopyOutResponse
+      case 'W' => CopyBothResponse
+      case 'D' => DataRow
+      case 'I' => EmptyQueryResponse
+      case 'E' => ErrorResponse
+      case 'V' => FunctionCallResponse
+      case 'n' => NoData
+      case 'N' => NoticeResponse
+      case 'A' => NotificationResponse
+      case 't' => ParameterDescription
+      case 'S' => ParameterStatus
+      case '1' => ParseComplete
+      case 's' => PortalSuspended
+      case 'Z' => ReadyForQuery
+      case 'T' => RowDescription
+      case _ => throw UnsupportedMessageType(code)
+    }
 
   }
 
@@ -231,7 +231,7 @@ package object protocol {
 
   object AuthenticationRequest extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) = {
+    protected def decodeContent(c: Charset, b: ByteIterator) = {
       (b.getInt: @switch) match {
         case 0 => AuthenticationOk
         case 2 => AuthenticationKerberosV5
@@ -260,7 +260,7 @@ package object protocol {
 
   object BackendKeyData extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       BackendKeyData(b.getInt, b.getInt)
 
   }
@@ -308,7 +308,7 @@ package object protocol {
     import CommandTag._
 
     // TODO Use a Try to avoid exceptions/invalid data
-    def decode(c: Charset, b: ByteIterator) = {
+    protected def decodeContent(c: Charset, b: ByteIterator) = {
       CommandComplete(b.getCString(c).split(' ') match {
         case Array(name, oid, rows) =>
           // TODO Verify large unsigned OID parses properly
@@ -330,7 +330,7 @@ package object protocol {
 
   object CopyData extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       CopyData(b.toByteString) // TODO compact?
 
   }
@@ -357,7 +357,7 @@ package object protocol {
     import Format._
     import FieldFormats._
 
-    def decode(c: Charset, b: ByteIterator) = {
+    protected def decodeContent(c: Charset, b: ByteIterator) = {
       val format = Format.decode(b.getByte)
       val size = b.getShort
       val types = Vector.fill(size)(b.getByte).map(Format.decode(_))
@@ -394,11 +394,15 @@ package object protocol {
 
   object CopyBothResponse extends CopyResponseDecoder('W')
 
-  case class DataRow(values: immutable.IndexedSeq[Column]) extends BackendMessage
+  case class DataRow(columns: DataRow.Columns) extends BackendMessage
 
   object DataRow extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    case class Column(value: Option[ByteString], charset: Charset)
+
+    type Columns = immutable.IndexedSeq[Column]
+
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       DataRow((0 until b.getShort) map { _ =>
         Column(
           Option(b.getInt).
@@ -418,11 +422,11 @@ package object protocol {
 
   case object EmptyQueryResponse extends BackendMessage.Empty
 
-  case class ErrorResponse(fields: immutable.Seq[ErrorResponse.Field]) extends BackendMessage
+  case class ErrorResponse(fields: ErrorResponse.Fields) extends BackendMessage
 
   object ErrorResponse extends Decoder with ResponseFields {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       ErrorResponse(decodeAll(c, b))
 
   }
@@ -440,7 +444,7 @@ package object protocol {
   case object Flush extends FrontendMessage.Empty('H')
 
   case class FunctionCall(target: OID,
-                          arguments: Seq[Parameter],
+                          arguments: immutable.Seq[Parameter],
                           result: Format) extends FrontendMessage.NonEmpty('F') {
 
     protected def encodeContent(c: Charset) =
@@ -456,7 +460,7 @@ package object protocol {
 
   object FunctionCallResponse extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       FunctionCallResponse(
         Option(b.getInt).
           filter(_ > 0).
@@ -467,11 +471,11 @@ package object protocol {
 
   case object NoData extends BackendMessage.Empty
 
-  case class NoticeResponse(fields: immutable.Seq[NoticeResponse.Field]) extends BackendMessage
+  case class NoticeResponse(fields: NoticeResponse.Fields) extends BackendMessage
 
   object NoticeResponse extends Decoder with ResponseFields {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       NoticeResponse(decodeAll(c, b))
 
   }
@@ -480,7 +484,7 @@ package object protocol {
 
   object NotificationResponse extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       NotificationResponse(b.getInt, b.getCString(c), b.getCString(c))
 
   }
@@ -489,7 +493,7 @@ package object protocol {
 
   object ParameterDescription extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       ParameterDescription(Vector.fill(b.getShort)(b.getInt))
 
   }
@@ -498,13 +502,13 @@ package object protocol {
 
   object ParameterStatus extends Decoder {
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       ParameterStatus(b.getCString(c), b.getCString(c))
 
   }
 
   case class Parse(query: String,
-                   types: Seq[OID] = Nil,
+                   types: immutable.Seq[OID] = Nil,
                    destination: PreparedStatement = PreparedStatement.Unnamed) extends FrontendMessage.NonEmpty('P') {
 
     protected def encodeContent(c: Charset) =
@@ -542,7 +546,7 @@ package object protocol {
 
     import TransactionStatus._
 
-    def decode(c: Charset, b: ByteIterator) =
+    protected def decodeContent(c: Charset, b: ByteIterator) =
       ReadyForQuery(
         (b.getByte: @switch) match {
           case 'I' => Idle
@@ -554,7 +558,7 @@ package object protocol {
 
   }
 
-  case class RowDescription(fields: immutable.IndexedSeq[RowDescription.Field]) extends BackendMessage
+  case class RowDescription(fields: RowDescription.Fields) extends BackendMessage
 
   object RowDescription extends Decoder {
 
@@ -564,9 +568,11 @@ package object protocol {
                      dataType: DataType,
                      format: Format)
 
+    type Fields = immutable.IndexedSeq[Field]
+
     case class DataType(oid: OID, size: Long, modifier: Int)
 
-    def decode(c: Charset, b: ByteIterator) = {
+    protected def decodeContent(c: Charset, b: ByteIterator) = {
       RowDescription(
         (0 until b.getShort).map { index =>
           Field(
@@ -637,12 +643,6 @@ package object protocol {
 
   case object Terminate extends FrontendMessage.Empty('X')
 
-  trait Decoder {
-
-    def decode(c: Charset, b: ByteIterator): BackendMessage
-
-  }
-
   // Note that the PostgreSQL documentation recommends only encoding parameters
   // using the text format, since it is portable across versions.
   trait Parameter {
@@ -674,9 +674,6 @@ package object protocol {
     }
 
   }
-
-  // TODO Make inner class of DataRow companion object?
-  case class Column(value: Option[ByteString], charset: Charset)
 
   sealed trait CommandTag
 
@@ -863,7 +860,9 @@ package object protocol {
     case class Line(index: Int) extends Field
     case class Routine(name: String) extends Field
 
-    protected def decodeAll(c: Charset, b: ByteIterator): immutable.Seq[Field] =
+    type Fields = immutable.Seq[Field]
+
+    protected def decodeAll(c: Charset, b: ByteIterator): Fields =
       Iterator.continually(b.getByte).
         takeWhile(_ != NUL).
         foldLeft(Vector.empty[Field]) { (fields, typ) =>
@@ -894,10 +893,6 @@ package object protocol {
 
   sealed abstract class DecoderException(msg: String)
     extends RuntimeException(msg) with NoStackTrace
-
-  @SerialVersionUID(1)
-  case class MessageTooLong(typ: Byte, length: Int, limit: Int)
-    extends DecoderException(s"Message type ${Integer.toHexString(typ)} with length $length exceeds maximum of $limit bytes")
 
   @SerialVersionUID(1)
   case class UnsupportedMessageType(typ: Byte)
