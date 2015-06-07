@@ -77,6 +77,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val (_, count) =
     QueryExecution().
+      atop(AsyncOperations(Sink.foreach(println))).
       atop(startup).
       atop(Codec(charset)).
       join(conn).

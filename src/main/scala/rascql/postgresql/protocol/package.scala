@@ -170,6 +170,8 @@ package object protocol {
 
   }
 
+  sealed trait AsyncOperation { _: BackendMessage => }
+
   sealed trait Decoder {
 
     import Decoder._
@@ -471,7 +473,7 @@ package object protocol {
 
   case object NoData extends BackendMessage.Empty
 
-  case class NoticeResponse(fields: NoticeResponse.Fields) extends BackendMessage
+  case class NoticeResponse(fields: NoticeResponse.Fields) extends BackendMessage with AsyncOperation
 
   object NoticeResponse extends Decoder with ResponseFields {
 
@@ -480,7 +482,7 @@ package object protocol {
 
   }
 
-  case class NotificationResponse(processId: Int, channel: String, payload: String) extends BackendMessage
+  case class NotificationResponse(processId: Int, channel: String, payload: String) extends BackendMessage with AsyncOperation
 
   object NotificationResponse extends Decoder {
 
@@ -498,7 +500,7 @@ package object protocol {
 
   }
 
-  case class ParameterStatus(key: String, value: String) extends BackendMessage
+  case class ParameterStatus(key: String, value: String) extends BackendMessage with AsyncOperation
 
   object ParameterStatus extends Decoder {
 
