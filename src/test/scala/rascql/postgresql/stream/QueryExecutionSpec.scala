@@ -28,6 +28,15 @@ import rascql.postgresql.protocol._
  */
 class QueryExecutionSpec extends StreamSpec {
 
+  def flow[In, Out, Mat](flow: Flow[In, Out, Mat])(fn: (TestPublisher.ManualProbe[In], TestSubscriber.ManualProbe[Out]) => Unit): Unit = {
+    val src = TestPublisher.manualProbe[In]()
+    val sink = TestSubscriber.manualProbe[Out]()
+
+    Source(src).via(flow).runWith(Sink(sink))
+
+    fn(src, sink)
+  }
+
   "A send query stage" should {
 
     import PreparedStatement.{Unnamed => Stmt}
@@ -35,12 +44,7 @@ class QueryExecutionSpec extends StreamSpec {
 
     val stage = Flow[SendQuery].transform(() => new SendQueryStage)
 
-    "convert a simple query" in {
-      val src = TestPublisher.manualProbe[SendQuery]()
-      val sink = TestSubscriber.manualProbe[FrontendMessage]()
-
-      Source(src).via(stage).runWith(Sink(sink))
-
+    "convert a simple query" in flow(stage) { (src, sink) =>
       val pub = src.expectSubscription()
       val sub = sink.expectSubscription()
       sub.request(3)
@@ -51,12 +55,7 @@ class QueryExecutionSpec extends StreamSpec {
       pub.expectCancellation()
     }
 
-    "convert a prepared statement" in {
-      val src = TestPublisher.manualProbe[SendQuery]()
-      val sink = TestSubscriber.manualProbe[FrontendMessage]()
-
-      Source(src).via(stage).runWith(Sink(sink))
-
+    "convert a prepared statement" in flow(stage) { (src, sink) =>
       val pub = src.expectSubscription()
       val sub = sink.expectSubscription()
       sub.request(6)
@@ -66,6 +65,23 @@ class QueryExecutionSpec extends StreamSpec {
       sink.expectNext(Describe(Ptl))
       sink.expectNext(Execute(Ptl))
       sink.expectNext(Sync)
+      sink.expectNoMsg(100.millis)
+      sub.cancel()
+      pub.expectCancellation()
+    }
+
+  }
+
+  "A query result stage" should {
+
+    val stage = Flow[BackendMessage].transform(() => new QueryResultStage)
+
+    "produce an empty result" in flow(stage) { (src, sink) =>
+      val pub = src.expectSubscription()
+      val sub = sink.expectSubscription()
+      sub.request(2)
+      pub.sendNext(EmptyQueryResponse)
+      sink.expectNext(EmptyQuery)
       sink.expectNoMsg(100.millis)
       sub.cancel()
       pub.expectCancellation()
