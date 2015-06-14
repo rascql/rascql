@@ -38,6 +38,16 @@ package stream {
 
   private[stream] case class SendExtendedQuery(statement: String, parameters: immutable.Seq[Parameter]) extends SendQuery
 
+  sealed trait QueryResult
+
+  case class QueryRowSet(tag: CommandTag, fields: RowDescription.Fields, rows: Seq[DataRow]) extends QueryResult
+
+  case class QueryComplete(tag: CommandTag) extends QueryResult
+
+  case object EmptyQuery extends QueryResult
+
+  case class QueryFailed(fields: ErrorResponse.Fields) extends QueryResult
+
   sealed abstract class StreamException(msg: String)
     extends RuntimeException(msg) with NoStackTrace
 
