@@ -36,4 +36,8 @@ package stream {
   case class UnexpectedBackendMessage(message: BackendMessage)
     extends StreamException(s"Unexpected backend message with type '${message.getClass.getSimpleName}'")
 
+  @SerialVersionUID(1)
+  case class UnexpectedFrontendMessage(message: FrontendMessage)
+    extends StreamException(s"Unexpected frontend message with type '${message.getClass.getSimpleName}'")
+
 }

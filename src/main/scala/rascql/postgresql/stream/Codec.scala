@@ -53,7 +53,7 @@ object Codec {
     BidiFlow() { b =>
 
       // TODO Support changing encoding based on ParameterStatus message?
-      val encoder = b.add(Flow[FrontendMessage].map(_.encode(charset)))
+      val encoder = b.add(Flow[FrontendMessage].transform(() => new EncoderStage(charset)))
       val decoder = b.add(Flow[ByteString].transform(() => new DecoderStage(charset)))
 
       BidiShape(encoder, decoder)
