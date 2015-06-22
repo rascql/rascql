@@ -37,6 +37,7 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val Array(username, password) = args
 
+  import system.dispatcher
   import FlowGraph.Implicits._
 
   val queries = Source(List(
@@ -69,10 +70,21 @@ object Demo extends App with DefaultEncoders with DefaultDecoders {
 
   val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
 
-  val stdout = Flow[Source[QueryResult, Unit]].flatten(FlattenStrategy.concat).to(Sink.foreach(println))
+  val stdout =
+    Flow[Source[Any, Any]].
+      flatten(FlattenStrategy.concat).
+      toMat(Sink.fold(0) { (acc, e) => println(e) ; acc + 1 })(Keep.right)
 
-  QueryExecution().atop(startup).atop(Codec(charset)).join(conn).runWith(queries, stdout)
+  val (_, count) =
+    QueryExecution().
+      atop(startup).
+      atop(Codec(charset)).
+      join(conn).
+      runWith(queries, stdout)
 
-  // FIXME Disconnect and stop actor system when queries complete
+  count.onComplete { c =>
+    println(c)
+    system.shutdown()
+  }
 
 }
