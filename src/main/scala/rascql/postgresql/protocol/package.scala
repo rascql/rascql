@@ -162,7 +162,7 @@ package object protocol {
 
   object BackendMessage {
 
-    trait Empty extends BackendMessage with Decoder {
+    sealed trait Empty extends BackendMessage with Decoder {
 
       protected def decodeContent(c: Charset, b: ByteIterator) = this
 
@@ -170,7 +170,7 @@ package object protocol {
 
   }
 
-  trait Decoder {
+  sealed trait Decoder {
 
     import Decoder._
 
@@ -645,7 +645,7 @@ package object protocol {
 
   // Note that the PostgreSQL documentation recommends only encoding parameters
   // using the text format, since it is portable across versions.
-  trait Parameter {
+  sealed trait Parameter {
 
     def format: Format
 
@@ -787,7 +787,7 @@ package object protocol {
 
   }
 
-  trait Password {
+  sealed trait Password {
 
     def encode(c: Charset): ByteString
 
