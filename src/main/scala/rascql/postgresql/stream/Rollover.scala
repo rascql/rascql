@@ -30,7 +30,7 @@ import akka.stream.scaladsl._
  */
 class Rollover[T](inputPorts: Int)
   extends FlexiRoute[T, UniformFanOutShape[T, T]](
-    new UniformFanOutShape(inputPorts), OperationAttributes.name("Rollover")) {
+    new UniformFanOutShape(inputPorts), Attributes.name("Rollover")) {
 
   import FlexiRoute._
 

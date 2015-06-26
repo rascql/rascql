@@ -17,7 +17,7 @@
 package rascql.postgresql.stream
 
 import akka.actor.ActorSystem
-import akka.stream.ActorFlowMaterializer
+import akka.stream.ActorMaterializer
 import akka.testkit.TestKitBase
 import org.scalatest._
 
@@ -30,7 +30,7 @@ private[stream] trait StreamSpec extends TestKitBase with WordSpecLike with Befo
 
   implicit lazy val system = ActorSystem(this.getClass.getSimpleName)
 
-  implicit lazy val materializer = ActorFlowMaterializer()
+  implicit lazy val materializer = ActorMaterializer()
 
   override protected def afterAll() = system.shutdown()
 

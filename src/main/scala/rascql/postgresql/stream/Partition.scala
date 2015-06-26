@@ -27,7 +27,7 @@ import akka.stream.scaladsl._
  */
 class Partition[T](fn: T => Boolean)
   extends FlexiRoute[T, PartitionShape[T]](
-    new PartitionShape[T], OperationAttributes.name("Partition")) {
+    new PartitionShape[T], Attributes.name("Partition")) {
 
   import FlexiRoute._
 
