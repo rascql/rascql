@@ -659,21 +659,22 @@ package object protocol {
   // TODO Make inner class of Bind/FunctionCall companion objects?
   object Parameter {
 
-    val NULL: Parameter = Raw(ByteString.newBuilder.putInt(-1).result)
+    private case class Raw(format: Format, bytes: ByteString) extends Parameter {
+      def encode(c: Charset) = bytes
+    }
 
-    def apply(f: Format)(fn: Charset => ByteString): Parameter = new Parameter {
-      val format = f
+    private case class Dynamic(format: Format)(fn: Charset => ByteString) extends Parameter {
       def encode(c: Charset) = fn(c).prependLength
     }
 
-    def apply(fn: Charset => ByteString): Parameter = Parameter(Format.Text)(fn)
+    val NULL: Parameter = Raw(Format.Text, ByteString.newBuilder.putInt(-1).result)
 
-    def apply(bytes: ByteString, f: Format = Format.Text): Parameter = Raw(bytes.prependLength, f)
+    def apply(f: Format)(fn: Charset => ByteString): Parameter = Dynamic(f)(fn)
 
-    private def Raw(bytes: ByteString, f: Format = Format.Text): Parameter = new Parameter {
-      val format = f
-      def encode(c: Charset) = bytes
-    }
+    def apply(fn: Charset => ByteString): Parameter = Dynamic(Format.Text)(fn)
+
+    def apply(bytes: ByteString, f: Format = Format.Text): Parameter =
+      Raw(f, bytes.prependLength)
 
   }
 
