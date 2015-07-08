@@ -1,7 +1,7 @@
 Rascql: Reactive, Asynchronous Scala Query Library
 ===
 
-An asynchronous Scala client for PostgreSQL built on top of [Akka Streams](http://akka.io/).
+An asynchronous Scala client for PostgreSQL 9.0 and later built on top of [Akka Streams](http://akka.io/).
 
 Following the example of Akka HTTP (and others), re-usable stream components are provided atop an immutable `case class`-based domain model to meet the goal of supreme composability.
 

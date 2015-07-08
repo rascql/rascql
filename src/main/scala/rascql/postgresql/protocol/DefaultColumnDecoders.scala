@@ -75,17 +75,19 @@ trait DefaultColumnDecoders {
 
   implicit val ByteArrayDecoder: ColumnDecoder[Array[Byte]] =
     TextDecoder {
-      _.stripPrefix("\\x").
-        grouped(2).
-        map(java.lang.Integer.parseInt(_, 16).toByte).
-        toArray
+      _.splitAt(2) match {
+        case (`HexPrefix`, digits) =>
+          digits.grouped(2).
+            map(java.lang.Integer.parseInt(_, 16).toByte).
+            toArray
+      }
     }
 
   implicit val ByteDecoder: ColumnDecoder[Byte] =
-    ByteArrayDecoder.andThen(_.map(_.head)) // FIXME Fail if more than one byte
+    ByteArrayDecoder.andThen(_.map { case Array(b) => b })
 
   implicit val CharDecoder: ColumnDecoder[Char] =
-    TextDecoder { _.head } // FIXME Fail if more than one character
+    TextDecoder { case s if s.length == 1 => s.head }
 
   // FIXME Poor performance
   implicit val DateDecoder: ColumnDecoder[java.util.Date] =
