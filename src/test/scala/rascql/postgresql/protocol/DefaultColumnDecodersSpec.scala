@@ -21,11 +21,11 @@ import akka.util.ByteString
 import org.scalatest._
 
 /**
- * Tests for [[DefaultDecoders]].
+ * Tests for [[DefaultColumnDecoders]].
  *
  * @author Philip L. McMahon
  */
-class DefaultDecodersSpec extends WordSpec with Matchers with DefaultDecoders {
+class DefaultColumnDecodersSpec extends WordSpec with Matchers with DefaultColumnDecoders {
 
   val charset = Charset.forName("UTF-8")
 
@@ -115,7 +115,7 @@ class DefaultDecodersSpec extends WordSpec with Matchers with DefaultDecoders {
 
   implicit class RichString(s: String) {
 
-    def shouldDecodeTo[T](right: T)(implicit d: Decoder[T]): T =
+    def shouldDecodeTo[T](right: T)(implicit d: ColumnDecoder[T]): T =
       DataRow.Column(Some(ByteString(s)), charset).as[T]
 
   }

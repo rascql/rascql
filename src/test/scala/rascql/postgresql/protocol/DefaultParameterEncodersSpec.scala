@@ -21,11 +21,11 @@ import akka.util.ByteString
 import org.scalatest._
 
 /**
- * Tests for [[DefaultEncoders]].
+ * Tests for [[DefaultParameterEncoders]].
  *
  * @author Philip L. McMahon
  */
-class DefaultEncodersSpec extends WordSpec with Matchers with DefaultEncoders {
+class DefaultParameterEncodersSpec extends WordSpec with Matchers with DefaultParameterEncoders {
 
   val charset = Charset.forName("UTF-8")
 
@@ -116,7 +116,7 @@ class DefaultEncodersSpec extends WordSpec with Matchers with DefaultEncoders {
 
   }
 
-  implicit class RichEncodable[T](t: T)(implicit e: Encoder[T]) {
+  implicit class RichEncodable[T](t: T)(implicit e: ParameterEncoder[T]) {
 
     def encoded = encodedRaw.drop(4) // Drop length
 

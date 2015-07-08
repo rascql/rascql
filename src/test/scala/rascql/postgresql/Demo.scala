@@ -28,7 +28,7 @@ import rascql.postgresql.stream._
  *
  * @author Philip L. McMahon
  */
-object Demo extends App with DefaultEncoders with DefaultDecoders {
+object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders {
 
   implicit val system = ActorSystem("Example")
   implicit val materializer = ActorMaterializer()

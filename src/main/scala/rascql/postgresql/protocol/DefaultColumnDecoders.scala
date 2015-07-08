@@ -23,20 +23,22 @@ import akka.util.ByteString
 /**
  * @author Philip L. McMahon
  */
-trait DefaultDecoders {
+trait DefaultColumnDecoders {
 
   import DataRow.Column
-  import DefaultEncoders.Constants._
+  import CodecConstants._
 
-  type Decoder[T] = Column => Option[T]
+  private val HexPrefix = "\\x"
 
-  object Decoder {
+  type ColumnDecoder[T] = Column => Option[T]
 
-    def apply[T](fn: (ByteString, Charset) => T): Decoder[T] = {
+  object ColumnDecoder {
+
+    def apply[T](fn: (ByteString, Charset) => T): ColumnDecoder[T] = {
       case Column(b, c) => b.map(fn(_, c))
     }
 
-    def apply[T](fn: ByteString => T): Decoder[T] = {
+    def apply[T](fn: ByteString => T): ColumnDecoder[T] = {
       case Column(b, _) => b.map(fn)
     }
 
@@ -46,32 +48,32 @@ trait DefaultDecoders {
 
     // TODO Support a "retry" with a different decoder if this attempt fails?
     // Eg, val r = Either[Y, X] = d.as[X].orElse[Y]
-    def as[T](implicit d: Decoder[T]): T = d(c).get
+    def as[T](implicit d: ColumnDecoder[T]): T = d(c).get
 
-    def asOpt[T](implicit d: Decoder[T]): Option[T] = d(c)
+    def asOpt[T](implicit d: ColumnDecoder[T]): Option[T] = d(c)
 
   }
 
-  implicit val StringDecoder: Decoder[String] =
-    Decoder { (b, c) => new String(b.toArray, c) }
+  implicit val StringDecoder: ColumnDecoder[String] =
+    ColumnDecoder { (b, c) => new String(b.toArray, c) }
 
   object TextDecoder {
 
-    def apply[T](fn: String => T): Decoder[T] =
+    def apply[T](fn: String => T): ColumnDecoder[T] =
       StringDecoder.andThen(_.map(fn))
 
   }
 
-  implicit val BigDecimalDecoder: Decoder[BigDecimal] =
+  implicit val BigDecimalDecoder: ColumnDecoder[BigDecimal] =
     TextDecoder { BigDecimal(_) }
 
-  implicit val BigIntDecoder: Decoder[BigInt] =
+  implicit val BigIntDecoder: ColumnDecoder[BigInt] =
     TextDecoder { BigInt(_) }
 
-  implicit val BooleanDecoder: Decoder[Boolean] =
-    Decoder { _ == True }
+  implicit val BooleanDecoder: ColumnDecoder[Boolean] =
+    ColumnDecoder { _ == True }
 
-  implicit val ByteArrayDecoder: Decoder[Array[Byte]] =
+  implicit val ByteArrayDecoder: ColumnDecoder[Array[Byte]] =
     TextDecoder {
       _.stripPrefix("\\x").
         grouped(2).
@@ -79,37 +81,37 @@ trait DefaultDecoders {
         toArray
     }
 
-  implicit val ByteDecoder: Decoder[Byte] =
+  implicit val ByteDecoder: ColumnDecoder[Byte] =
     ByteArrayDecoder.andThen(_.map(_.head)) // FIXME Fail if more than one byte
 
-  implicit val CharDecoder: Decoder[Char] =
+  implicit val CharDecoder: ColumnDecoder[Char] =
     TextDecoder { _.head } // FIXME Fail if more than one character
 
   // FIXME Poor performance
-  implicit val DateDecoder: Decoder[java.util.Date] =
+  implicit val DateDecoder: ColumnDecoder[java.util.Date] =
     TextDecoder {
       val sdf = new SimpleDateFormat(DateFormat)
       sdf.setTimeZone(UTC)
       sdf.parse(_)
     }
 
-  implicit val DoubleDecoder: Decoder[Double] =
+  implicit val DoubleDecoder: ColumnDecoder[Double] =
     TextDecoder { _.toDouble }
 
-  implicit val FloatDecoder: Decoder[Float] =
+  implicit val FloatDecoder: ColumnDecoder[Float] =
     TextDecoder { _.toFloat }
 
-  implicit val IntDecoder: Decoder[Int] =
+  implicit val IntDecoder: ColumnDecoder[Int] =
     TextDecoder { _.toInt }
 
-  implicit val LongDecoder: Decoder[Long] =
+  implicit val LongDecoder: ColumnDecoder[Long] =
     TextDecoder { _.toLong }
 
-  implicit val ShortDecoder: Decoder[Short] =
+  implicit val ShortDecoder: ColumnDecoder[Short] =
     TextDecoder { _.toShort }
 
   // TODO Add Decoder[T] to Decoder[Option[T]] and other conversions?
 
 }
 
-object DefaultDecoders extends DefaultDecoders
+object DefaultColumnDecoders extends DefaultColumnDecoders
