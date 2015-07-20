@@ -114,7 +114,7 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
     "signal termination when the query source finishes" in bidi(qexec) { (queries, femsgs, bemsgs, results) =>
       val qpub = queries.expectSubscription()
       val bepub = bemsgs.expectSubscription()
-      List(femsgs, results).map(_.expectSubscription()).foreach(_.request(1))
+      List(femsgs, results).map(_.expectSubscription()).foreach(_.request(2))
       bepub.sendNext(idle)
       femsgs.expectNoMsg(100.millis)
       qpub.sendComplete()
@@ -150,8 +150,6 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
       val QueryRowSet(_, _, rows) = sink.expectNext()
       rows must have size(1)
       sink.expectComplete()
-      rsub.request(1)
-      results.expectNext().runForeach(println) // FIXME Don't emit this element
       results.expectComplete()
     }
 
