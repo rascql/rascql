@@ -31,7 +31,9 @@ import rascql.postgresql.stream._
 object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders {
 
   implicit val system = ActorSystem("Example")
-  implicit val materializer = ActorMaterializer()
+  val settings = ActorMaterializerSettings(
+    system.settings.config.getConfig("rascql.stream.materializer"))
+  implicit val materializer = ActorMaterializer(settings, "Rascql", Optimizations.all)
 
   var charset = Charset.forName("UTF-8")
 
