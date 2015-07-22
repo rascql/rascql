@@ -24,37 +24,37 @@ import rascql.postgresql.protocol._
  * Executes simple and extended (prepared) queries, backpressuring when a query
  * is received and resuming when the server is ready for the next query.
  *
+ * A [[Terminate]] is sent when the [[SendQuery]] source finishes, tearing down
+ * the stream.
+ *
  * {{{
- *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
- *                      .                                                                       .
- *                      .                           +---------------+       +---------------+   .
- *                      .                           |               |       |               |   .
- *           SendQuery --------------------------> [i]     zip     [o] --> [i]   queries   [o] --> FrontendMessage
- *                      .                           |               |       |               |   .
- *                      .                           +------[i]------+       +---------------+   .
- *                      .                                   ^                                   .
- *                      .                                   |                                   .
- *                      .                           +------[o]------+                           .
- *                      .                           |               |                           .
- *                      .                           |    tokens     |                           .
- *                      .                           |               |                           .
- *                      .                           +------[i]------+                           .
- *                      .                                   ^                                   .
- *                      .                                   |                                   .
- *                      .   +---------------+       +------[o]------+                           .
- *                      .   |               |       |               |                           .
- * Source[QueryResult] <-- [o]   results   [i] <-- [o]  broadcast  [i] <-------------------------- BackendMessage
- *                      .   |               |       |               |                           .
- *                      .   +---------------+       +---------------+                           .
- *                      .                                                                       .
- *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+ *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .   . . . . . . . . . . . .
+ *                      .                                                                                               .
+ *                      .                           +---------------+       +---------------+       +---------------+   .
+ *                      .                           |               |       |               |       |               |   .
+ *           SendQuery --------------------------> [i]     zip     [o] --> [i]   queries   [o] --> [i]   concat    [o] --> FrontendMessage
+ *                      .                           |               |       |               |       |               |   .
+ *                      .                           +------[i]------+       +---------------+       +------[o]------+   .
+ *                      .                                   ^                                               ^           .
+ *                      .                                   |                                               |           .
+ *                      .                           +------[o]------+                               +------[o]------+   .
+ *                      .                           |               |                               |               |   .
+ *                      .                           |    tokens     |                               |   terminate   |   .
+ *                      .                           |               |                               |               |   .
+ *                      .                           +------[i]------+                               +---------------+   .
+ *                      .                                   ^                                                           .
+ *                      .                                   |                                                           .
+ *                      .   +---------------+       +------[o]------+                                                   .
+ *                      .   |               |       |               |                                                   .
+ * Source[QueryResult] <-- [o]   results   [i] <-- [o]  broadcast  [i] <-------------------------------------------------- BackendMessage
+ *                      .   |               |       |               |                                                   .
+ *                      .   +---------------+       +---------------+                                                   .
+ *                      .                                                                                               .
+ *                      . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
  *
  * @author Philip L. McMahon
  */
 object QueryExecution {
-
-  private case object Next
-  private type Next = Next.type
 
   import FlowGraph.Implicits._
 
@@ -63,17 +63,21 @@ object QueryExecution {
 
       // Don't allow executing the next statement unless we've seen the prior statement complete
       // Match statement with a token to before processing the statement
-      val zip = b.add(ZipWith[Next, SendQuery, SendQuery] { case (_, s) => s })
-      val tokens = b.add(Flow[BackendMessage].collect { case _: ReadyForQuery => Next })
-      val broadcast = b.add(Broadcast[BackendMessage](2))
+      val zip = b.add(ZipWith[TransactionStatus, SendQuery, SendQuery](Keep.right))
+      val tokens = b.add(Flow[BackendMessage].collect { case ReadyForQuery(s) => s })
+      val concat = b.add(Concat[FrontendMessage]())
+      val broadcast = b.add(Broadcast[BackendMessage](2, eagerCancel = false))
       val queries = b.add(Flow[SendQuery].transform(() => new SendQueryStage))
-      val results = b.add(Flow[BackendMessage].splitWhen(_.isInstanceOf[ReadyForQuery]).map(_.transform(() => new QueryResultStage)))
+      val terminate = b.add(Source.single(Terminate))
+      // Drop first message, which will be the initial RFQ
+      val results = b.add(Flow[BackendMessage].dropWhile(_.isInstanceOf[ReadyForQuery]).splitAfter(_.isInstanceOf[ReadyForQuery]).map(_.transform(() => new QueryResultStage)))
 
       broadcast ~> results
       broadcast ~> tokens ~> zip.in0
-                             zip.out ~> queries
+                             zip.out ~> queries ~> concat
+                             terminate          ~> concat
 
-      BidiShape(zip.in1, queries.outlet, broadcast.in, results.outlet)
+      BidiShape(zip.in1, concat.out, broadcast.in, results.outlet)
     } named("QueryExecution")
 
 }

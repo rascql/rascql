@@ -20,21 +20,36 @@ import scala.concurrent.duration._
 import akka.stream.scaladsl._
 import akka.stream.testkit._
 import rascql.postgresql.protocol._
+import org.scalatest.MustMatchers
 
 /**
  * Tests for [[QueryExecution]].
  *
  * @author Philip L. McMahon
  */
-class QueryExecutionSpec extends StreamSpec {
+class QueryExecutionSpec extends StreamSpec with MustMatchers {
 
-  def flow[In, Out, Mat](flow: Flow[In, Out, Mat])(fn: (TestPublisher.ManualProbe[In], TestSubscriber.ManualProbe[Out]) => Unit): Unit = {
+  type PubProbe[T] = TestPublisher.ManualProbe[T]
+  type SubProbe[T] = TestSubscriber.ManualProbe[T]
+
+  def flow[In, Out](flow: Flow[In, Out, _])(fn: (PubProbe[In], SubProbe[Out]) => Unit): Unit = {
     val src = TestPublisher.manualProbe[In]()
     val sink = TestSubscriber.manualProbe[Out]()
 
     Source(src).via(flow).runWith(Sink(sink))
 
     fn(src, sink)
+  }
+
+  def bidi[I1, O1, I2, O2](bidi: BidiFlow[I1, O1, I2, O2, _])(fn: (PubProbe[I1], SubProbe[O1], PubProbe[I2], SubProbe[O2]) => Unit): Unit = {
+    val lsrc = TestPublisher.manualProbe[I1]()
+    val rsink = TestSubscriber.manualProbe[O1]()
+    val rsrc = TestPublisher.manualProbe[I2]()
+    val lsink = TestSubscriber.manualProbe[O2]()
+
+    bidi.join(Flow.wrap(Sink(rsink), Source(rsrc))(Keep.none)).runWith(Source(lsrc), Sink(lsink))
+
+    fn(lsrc, rsink, rsrc, lsink)
   }
 
   "A send query stage" should {
@@ -85,6 +100,59 @@ class QueryExecutionSpec extends StreamSpec {
       sink.expectNoMsg(100.millis)
       sub.cancel()
       pub.expectCancellation()
+    }
+
+  }
+
+  "A query execution bidirectional flow" should {
+
+    val qexec = QueryExecution()
+    val idle = ReadyForQuery(TransactionStatus.Idle)
+    val emptyDesc = RowDescription(Vector.empty)
+    val emptyData = DataRow(Vector.empty)
+
+    "signal termination when the query source finishes" in bidi(qexec) { (queries, femsgs, bemsgs, results) =>
+      val qpub = queries.expectSubscription()
+      val bepub = bemsgs.expectSubscription()
+      List(femsgs, results).map(_.expectSubscription()).foreach(_.request(1))
+      bepub.sendNext(idle)
+      femsgs.expectNoMsg(100.millis)
+      qpub.sendComplete()
+      femsgs.expectNext(Terminate)
+      femsgs.expectComplete()
+      bepub.sendComplete()
+      results.expectComplete()
+    }
+
+    "complete an in-flight result when the query source finishes" in bidi(qexec) { (queries, femsgs, bemsgs, results) =>
+      val qpub = queries.expectSubscription()
+      val bepub = bemsgs.expectSubscription()
+      val fesub = femsgs.expectSubscription()
+      val rsub = results.expectSubscription()
+      fesub.request(10)
+      rsub.request(1)
+      bepub.sendNext(idle)
+      qpub.sendNext(SendQuery("SELECT 1"))
+      qpub.sendComplete()
+      femsgs.expectNext(Query("SELECT 1"))
+      femsgs.expectNext(Terminate)
+      femsgs.expectComplete()
+      bepub.sendNext(emptyDesc)
+      bepub.sendNext(emptyData)
+      bepub.sendNext(CommandComplete(CommandTag.RowsAffected("SELECT", 1)))
+      bepub.sendNext(idle)
+      bepub.sendComplete()
+      val source = results.expectNext()
+      val sink = TestSubscriber.probe[QueryResult]()
+      source.runWith(Sink(sink))
+      val ssub = sink.expectSubscription()
+      ssub.request(2)
+      val QueryRowSet(_, _, rows) = sink.expectNext()
+      rows must have size(1)
+      sink.expectComplete()
+      rsub.request(1)
+      results.expectNext().runForeach(println) // FIXME Don't emit this element
+      results.expectComplete()
     }
 
   }
