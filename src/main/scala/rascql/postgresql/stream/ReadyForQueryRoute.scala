@@ -38,22 +38,40 @@ private[stream] class ReadyForQueryRoute
 
   def createRouteLogic(p: PortT) = new RouteLogic[BackendMessage] {
 
-    def initialState = readyForQuery(_.emit(p.out1))
+    // First element is a RFQ(Idle), which is sent only to transaction outlet
+    def initialState = State[Outlet[TransactionStatus]](DemandFrom(p.out1)) {
+      case (ctx, out, ReadyForQuery(status)) =>
+        ctx.emit(out)(status)
+        broadcast
+      case _ =>
+        SameState
+    }
 
-    def readyForQuery(fn: RouteLogicContext => TransactionStatus => Unit): State[Any] =
+    def broadcast: State[Any] =
       State[Any](DemandFromAll(p.outlets)) {
         (ctx, _, elem) =>
           ctx.emit(p.out0)(elem)
-          Option(elem).collect { case ReadyForQuery(status) => status }.map(fn(ctx))
+          Option(elem).collect { case ReadyForQuery(status) => status }.map(ctx.emit(p.out1))
           SameState
       }
+
+    // Because the transaction state has torn down, drop the RFQ when received
+    // and finish entire stream
+    def dropLast = State[Outlet[BackendMessage]](DemandFrom(p.out0)) {
+      case (ctx, _, _: ReadyForQuery) =>
+        ctx.finish()
+        SameState
+      case (ctx, out, elem) =>
+        ctx.emit(out)(elem)
+        SameState
+    }
 
     override def initialCompletionHandling = CompletionHandling(
       onUpstreamFinish = _ => (),
       onUpstreamFailure = (_, _) => (),
       onDownstreamFinish = (ctx, port) =>
         // When transaction state port completes, finish after next RFQ
-        if (port == p.out1) readyForQuery { ctx => _ => ctx.finish() }
+        if (port == p.out1) dropLast
         // Otherwise tear down stream
         else { ctx.finish() ; SameState }
     )
