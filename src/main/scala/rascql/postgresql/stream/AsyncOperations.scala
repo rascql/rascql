@@ -61,6 +61,6 @@ object AsyncOperations {
       partition.matched.map(_.asInstanceOf[AsyncOperation]) ~> ops
 
       BidiShape(identity.inlet, identity.outlet, partition.in, partition.unmatched)
-    }
+    } named("AsyncOperations")
 
 }

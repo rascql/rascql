@@ -74,6 +74,6 @@ object QueryExecution {
                              zip.out ~> queries
 
       BidiShape(zip.in1, queries.outlet, broadcast.in, results.outlet)
-    }
+    } named("QueryExecution")
 
 }
