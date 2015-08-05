@@ -36,24 +36,21 @@ class Rollover[T](inputPorts: Int)
 
   def createRouteLogic(p: PortT) = new RouteLogic[T] {
 
-    private val states = p.outArray.iterator.map { o =>
-      State(DemandFrom(o)) {
-        (ctx, _, elem) =>
-          ctx.emit(o)(elem)
+    private val states = p.outArray.iterator.map(DemandFrom(_)).map {
+      State(_) {
+        (ctx, out, elem) =>
+          ctx.emit(out)(elem)
           SameState
       }
     }
 
     // Create a special completion handler that advances to the next state when the current downstream completes
     // FIXME Does this need to handle a non-current downstream finishing?
-    override def initialCompletionHandling = CompletionHandling(
-      onUpstreamFinish = _ => (),
-      onUpstreamFailure = (ctx, cause) => (),
-      onDownstreamFinish = (ctx, _) => {
+    override def initialCompletionHandling =
+      defaultCompletionHandling.copy(onDownstreamFinish = (ctx, _) => {
         if (states.hasNext) states.next()
         else { ctx.finish(); SameState }
-      }
-    )
+      })
 
     def initialState = states.next()
 
