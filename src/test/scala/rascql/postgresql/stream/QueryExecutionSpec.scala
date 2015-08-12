@@ -124,6 +124,35 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
       results.expectComplete()
     }
 
+    "group commands into a stream of results" in bidi(qexec) { (queries, femsgs, bemsgs, results) =>
+      val qpub = queries.expectSubscription()
+      val bepub = bemsgs.expectSubscription()
+      List(femsgs, results).foreach(_.expectSubscription().request(Int.MaxValue))
+      bepub.sendNext(idle)
+      qpub.sendNext(SendQuery("BEGIN; SELECT 1; COMMIT"))
+      femsgs.expectNext(Query("BEGIN; SELECT 1; COMMIT"))
+      bepub.sendNext(CommandComplete(CommandTag.NameOnly("BEGIN")))
+      val sink = TestSubscriber.probe[QueryResult]()
+      results.expectNext().runWith(Sink(sink))
+      sink.expectSubscription().request(Int.MaxValue)
+      sink.expectNext(QueryComplete(CommandTag.NameOnly("BEGIN")))
+      bepub.sendNext(emptyDesc)
+      bepub.sendNext(emptyData)
+      bepub.sendNext(CommandComplete(CommandTag.RowsAffected("SELECT", 1)))
+      val QueryRowSet(_, _, rows) = sink.expectNext()
+      rows must have size(1)
+      bepub.sendNext(CommandComplete(CommandTag.NameOnly("COMMIT")))
+      sink.expectNext(QueryComplete(CommandTag.NameOnly("COMMIT")))
+      bepub.sendNext(idle)
+      sink.expectComplete()
+      qpub.sendComplete()
+      femsgs.expectNext(Terminate)
+      femsgs.expectComplete()
+      bepub.sendComplete()
+      results.expectNext().runWith(Sink.ignore) // Empty source
+      results.expectComplete()
+    }
+
     "complete an in-flight result when the query source finishes" in bidi(qexec) { (queries, femsgs, bemsgs, results) =>
       val qpub = queries.expectSubscription()
       val bepub = bemsgs.expectSubscription()
