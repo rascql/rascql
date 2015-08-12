@@ -47,34 +47,31 @@ private[stream] class ReadyForQueryRoute
         SameState
     }
 
-    def broadcast: State[Any] =
-      State[Any](DemandFromAll(p.outlets)) {
-        (ctx, _, elem) =>
-          ctx.emit(p.out0)(elem)
-          Option(elem).collect { case ReadyForQuery(status) => status }.map(ctx.emit(p.out1))
-          SameState
-      }
+    def broadcast: State[Any] = State[Any](DemandFromAll(p)) {
+      (ctx, _, elem) =>
+        ctx.emit(p.out0)(elem)
+        Option(elem).
+          collect { case ReadyForQuery(status) => status }.
+          foreach(ctx.emit(p.out1))
+        SameState
+    }
 
     // Because the transaction state has torn down, drop the RFQ when received
     // and finish entire stream
     def dropLast = State[Outlet[BackendMessage]](DemandFrom(p.out0)) {
-      case (ctx, _, _: ReadyForQuery) =>
-        ctx.finish()
-        SameState
-      case (ctx, out, elem) =>
-        ctx.emit(out)(elem)
+      (ctx, out, elem) =>
+        if (elem.isInstanceOf[ReadyForQuery]) ctx.finish()
+        else ctx.emit(out)(elem)
         SameState
     }
 
-    override def initialCompletionHandling = CompletionHandling(
-      onUpstreamFinish = _ => (),
-      onUpstreamFailure = (_, _) => (),
-      onDownstreamFinish = (ctx, port) =>
+    override def initialCompletionHandling =
+      defaultCompletionHandling.copy(onDownstreamFinish = (ctx, port) =>
         // When transaction state port completes, finish after next RFQ
         if (port == p.out1) dropLast
         // Otherwise tear down stream
         else { ctx.finish() ; SameState }
-    )
+      )
 
   }
 
