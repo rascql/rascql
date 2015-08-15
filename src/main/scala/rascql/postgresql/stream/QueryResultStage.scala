@@ -23,6 +23,10 @@ import rascql.postgresql.protocol._
  * Converts a [[BackendMessage]] stream to a [[QueryResult]], discarding any
  * unexpected or irrelevant messages.
  *
+ * Note that the stream will finish when a [[ReadyForQuery]] is received,
+ * since this stream of results is matched to a single query, which we now know
+ * is complete.
+ *
  * TODO Generate partial row result on downstream failure?
  */
 private[stream] class QueryResultStage extends StatefulStage[BackendMessage, QueryResult] {
@@ -40,6 +44,8 @@ private[stream] class QueryResultStage extends StatefulStage[BackendMessage, Que
           ctx.push(EmptyQuery)
         case ErrorResponse(fields) =>
           ctx.push(QueryFailed(fields))
+        case _: ReadyForQuery =>
+          ctx.finish()
         case _ =>
           ctx.pull() // FIXME What else do we need to handle?
       }
@@ -61,6 +67,8 @@ private[stream] class QueryResultStage extends StatefulStage[BackendMessage, Que
         case ErrorResponse(fields) =>
           become(idle)
           ctx.push(QueryFailed(fields))
+        case _: ReadyForQuery =>
+          ctx.finish()
         case _ =>
           ctx.pull() // FIXME What else do we need to handle?
       }

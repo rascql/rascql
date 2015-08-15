@@ -106,6 +106,8 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
 
   "A query execution bidirectional flow" should {
 
+    import CommandTag._
+
     val qexec = QueryExecution()
     val idle = ReadyForQuery(TransactionStatus.Idle)
     val emptyDesc = RowDescription(Vector.empty)
@@ -129,27 +131,28 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
       val bepub = bemsgs.expectSubscription()
       List(femsgs, results).foreach(_.expectSubscription().request(Int.MaxValue))
       bepub.sendNext(idle)
-      qpub.sendNext(SendQuery("BEGIN; SELECT 1; COMMIT"))
-      femsgs.expectNext(Query("BEGIN; SELECT 1; COMMIT"))
-      bepub.sendNext(CommandComplete(CommandTag.NameOnly("BEGIN")))
-      val sink = TestSubscriber.probe[QueryResult]()
-      results.expectNext().runWith(Sink(sink))
-      sink.expectSubscription().request(Int.MaxValue)
-      sink.expectNext(QueryComplete(CommandTag.NameOnly("BEGIN")))
-      bepub.sendNext(emptyDesc)
-      bepub.sendNext(emptyData)
-      bepub.sendNext(CommandComplete(CommandTag.RowsAffected("SELECT", 1)))
-      val QueryRowSet(_, _, rows) = sink.expectNext()
-      rows must have size(1)
-      bepub.sendNext(CommandComplete(CommandTag.NameOnly("COMMIT")))
-      sink.expectNext(QueryComplete(CommandTag.NameOnly("COMMIT")))
-      bepub.sendNext(idle)
-      sink.expectComplete()
+      1 to 5 foreach { i =>
+        qpub.sendNext(SendQuery("BEGIN; SELECT $i; COMMIT"))
+        femsgs.expectNext(Query("BEGIN; SELECT $i; COMMIT"))
+        bepub.sendNext(CommandComplete(NameOnly("BEGIN")))
+        val sink = TestSubscriber.probe[QueryResult]()
+        results.expectNext().runWith(Sink(sink))
+        sink.expectSubscription().request(Int.MaxValue)
+        sink.expectNext(QueryComplete(NameOnly("BEGIN")))
+        bepub.sendNext(emptyDesc)
+        bepub.sendNext(emptyData)
+        bepub.sendNext(CommandComplete(RowsAffected("SELECT", i)))
+        val QueryRowSet(_, _, rows) = sink.expectNext()
+        rows must have size(1)
+        bepub.sendNext(CommandComplete(NameOnly("COMMIT")))
+        sink.expectNext(QueryComplete(NameOnly("COMMIT")))
+        bepub.sendNext(idle)
+        sink.expectComplete()
+      }
       qpub.sendComplete()
       femsgs.expectNext(Terminate)
       femsgs.expectComplete()
       bepub.sendComplete()
-      results.expectNext().runWith(Sink.ignore) // Empty source
       results.expectComplete()
     }
 
@@ -168,14 +171,13 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
       femsgs.expectComplete()
       bepub.sendNext(emptyDesc)
       bepub.sendNext(emptyData)
-      bepub.sendNext(CommandComplete(CommandTag.RowsAffected("SELECT", 1)))
+      bepub.sendNext(CommandComplete(RowsAffected("SELECT", 1)))
       bepub.sendNext(idle)
       bepub.sendComplete()
       val source = results.expectNext()
       val sink = TestSubscriber.probe[QueryResult]()
       source.runWith(Sink(sink))
-      val ssub = sink.expectSubscription()
-      ssub.request(2)
+      sink.expectSubscription().request(2) // Get QRS and complete message
       val QueryRowSet(_, _, rows) = sink.expectNext()
       rows must have size(1)
       sink.expectComplete()

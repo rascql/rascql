@@ -45,9 +45,16 @@ import rascql.postgresql.protocol._
  *                      .                           +------[i]------+       +---------------+       +---------------+   .
  *                      .                                   ^                                                           .
  *                      .                                   |                                                           .
+ *                      .                           +------[o]------+                                                   .
+ *                      .                           |               |                                                   .
+ *                      .                           |    tokens     |                                                  .
+ *                      .                           |               |                                                   .
+ *                      .                           +------[i]------+                                                   .
+ *                      .                                   |                                                           .
+ *                      .                                   |                                                           .
  *                      .   +---------------+       +------[o]------+                                                   .
  *                      .   |               |       |               |                                                   .
- * Source[QueryResult] <-- [o]   results   [i] <-- [o]     rfq     [i] <-------------------------------------------------- BackendMessage
+ * Source[QueryResult] <-- [o]   results   [i] <-- [o]  broadcast  [i] <-------------------------------------------------- BackendMessage
  *                      .   |               |       |               |                                                   .
  *                      .   +---------------+       +---------------+                                                   .
  *                      .                                                                                               .
@@ -64,19 +71,41 @@ object QueryExecution {
 
       // Don't allow executing the next statement unless we've seen the prior statement complete
       // Match statement with a token to before processing the statement
-      val zip = b.add(ZipWith[TransactionStatus, SendQuery, SendQuery](Keep.right))
-      val rfq = b.add(new ReadyForQueryRoute)
+      val zip = b.add(ZipWith[Any, SendQuery, SendQuery](Keep.right))
+      val tokens = b.add(Flow[BackendMessage].collect { case rfq: ReadyForQuery => rfq })
+      val broadcast = b.add(Broadcast[BackendMessage](2, eagerCancel = false))
       val concat = b.add(Concat[FrontendMessage]())
       val queries = b.add(Flow[SendQuery].transform(() => new SendQueryStage))
       val terminate = b.add(Source.single(Terminate))
-      val results = b.add(Flow[BackendMessage].splitAfter(_.isInstanceOf[ReadyForQuery]).map(_.transform(() => new QueryResultStage)))
+      // Group the messages into vectors of at most two elements, and then
+      // split into a new sub-stream only when we have ReadyForQuery followed
+      // by another message. The RFQ is published to the existing sub-stream
+      // rather than the new one, so no messages are lost.
+      val results = b.add(Flow[BackendMessage].
+        drop(1). // Drop initial RFQ(Idle)
+        scan(Vector.empty[BackendMessage]) {
+          case (_ :+ prev, msg) => Vector(prev, msg)
+          case (prev, msg) => prev :+ msg // Single-element or empty vector
+        }.
+        drop(1). // Drop initial empty Vector
+        splitWhen {
+          case Vector(_: ReadyForQuery, msg) => true
+          case _ => false
+        }.
+        map {
+          _.collect {
+            case _ :+ msg => msg // Only publish "current" message
+            case Vector(msg) => msg // The first message, will only match once
+          }.
+          transform(() => new QueryResultStage)
+        })
 
-      rfq.out0 ~> results
-      rfq.out1 ~> zip.in0
-                  zip.out ~> queries ~> concat
-                  terminate          ~> concat
+      broadcast ~> results
+      broadcast ~> tokens ~> zip.in0
+                             zip.out ~> queries ~> concat
+                             terminate          ~> concat
 
-      BidiShape(zip.in1, concat.out, rfq.in, results.outlet)
+      BidiShape(zip.in1, concat.out, broadcast.in, results.outlet)
     } named("QueryExecution")
 
 }
