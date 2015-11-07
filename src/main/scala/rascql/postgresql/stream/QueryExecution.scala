@@ -67,7 +67,7 @@ object QueryExecution {
   import FlowGraph.Implicits._
 
   def apply(): BidiFlow[SendQuery, FrontendMessage, BackendMessage, Source[QueryResult, Unit], Unit] =
-    BidiFlow() { implicit b =>
+    BidiFlow.fromGraph(FlowGraph.create() { implicit b =>
 
       // Don't allow executing the next statement unless we've seen the prior statement complete
       // Match statement with a token to before processing the statement
@@ -106,6 +106,6 @@ object QueryExecution {
                              terminate          ~> concat
 
       BidiShape(zip.in1, concat.out, broadcast.in, results.outlet)
-    } named("QueryExecution")
+    } named("QueryExecution"))
 
 }

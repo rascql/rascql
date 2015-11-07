@@ -47,7 +47,7 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
     val rsrc = TestPublisher.manualProbe[I2]()
     val lsink = TestSubscriber.manualProbe[O2]()
 
-    bidi.join(Flow.wrap(Sink(rsink), Source(rsrc))(Keep.none)).runWith(Source(lsrc), Sink(lsink))
+    bidi.join(Flow.fromSinkAndSourceMat(Sink(rsink), Source(rsrc))(Keep.none)).runWith(Source(lsrc), Sink(lsink))
 
     fn(lsrc, rsink, rsrc, lsink)
   }

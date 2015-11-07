@@ -16,6 +16,7 @@
 
 package rascql.postgresql.stream
 
+import akka.stream.ClosedShape
 import akka.stream.scaladsl._
 import akka.stream.testkit._
 import org.scalatest._
@@ -35,12 +36,13 @@ class RolloverSpec extends StreamSpec with WordSpecLike {
       val c1 = TestSubscriber.manualProbe[Int]()
       val c2 = TestSubscriber.manualProbe[Int]()
 
-      FlowGraph.closed() { implicit b =>
+      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
         val rollover = b.add(Rollover[Int](2))
         Source(List(1, 2)) ~> rollover.in
         rollover ~> Sink(c1)
         rollover ~> Sink(c2)
-      }.run()
+        ClosedShape
+      }).run()
 
       val sub1 = c1.expectSubscription()
       val sub2 = c2.expectSubscription()

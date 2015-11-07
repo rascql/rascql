@@ -17,6 +17,7 @@
 package rascql.postgresql.stream
 
 import scala.collection.immutable
+import akka.stream.FlowShape
 import akka.stream.scaladsl._
 import rascql.postgresql.protocol._
 
@@ -51,7 +52,7 @@ object Startup {
   type Parameters = immutable.Map[String, String]
 
   def apply(username: String, password: String, parameters: Parameters): Flow[BackendMessage, FrontendMessage, Unit] =
-    Flow() { implicit b =>
+    Flow.fromGraph(FlowGraph.create() { implicit b =>
 
       val initial = b.add(Source.single[FrontendMessage](StartupMessage(username, parameters)))
       val authn = b.add(Flow[BackendMessage].transform(() => new AuthenticationStage(username, password)))
@@ -60,7 +61,7 @@ object Startup {
       initial ~> concat
         authn ~> concat
 
-      (authn.inlet, concat.out)
-    } named("Startup")
+      FlowShape(authn.inlet, concat.out)
+    } named("Startup"))
 
 }

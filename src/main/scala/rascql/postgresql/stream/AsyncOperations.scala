@@ -54,13 +54,13 @@ object AsyncOperations {
   import FlowGraph.Implicits._
 
   def apply[Mat](sink: Sink[AsyncOperation, Mat]): BidiFlow[FrontendMessage, FrontendMessage, BackendMessage, BackendMessage, Mat] =
-    BidiFlow(sink) { implicit b => ops =>
+    BidiFlow.fromGraph(FlowGraph.create(sink) { implicit b => ops =>
       val identity = b.add(Flow[FrontendMessage])
       val partition = b.add(Partition[BackendMessage](_.isInstanceOf[AsyncOperation]))
 
       partition.matched.map(_.asInstanceOf[AsyncOperation]) ~> ops
 
       BidiShape(identity.inlet, identity.outlet, partition.in, partition.unmatched)
-    } named("AsyncOperations")
+    } named("AsyncOperations"))
 
 }

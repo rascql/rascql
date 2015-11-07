@@ -17,7 +17,7 @@
 package rascql.postgresql.stream
 
 import akka.stream._
-import akka.stream.scaladsl._
+import akka.stream.stage._
 
 /**
  * Creates an ordered sequence of [[Outlet]]s, which will be activated
@@ -28,31 +28,31 @@ import akka.stream.scaladsl._
  *
  * @author Philip L. McMahon
  */
-class Rollover[T](inputPorts: Int)
-  extends FlexiRoute[T, UniformFanOutShape[T, T]](
-    new UniformFanOutShape(inputPorts), Attributes.name("Rollover")) {
+class Rollover[T](outputPorts: Int) extends GraphStage[UniformFanOutShape[T, T]] {
 
-  import FlexiRoute._
+  require(outputPorts > 1, "At least two output ports required")
 
-  def createRouteLogic(p: PortT) = new RouteLogic[T] {
+  val shape = new UniformFanOutShape[T, T](outputPorts, "Rollover")
 
-    private val states = p.outArray.iterator.map(DemandFrom(_)).map {
-      State(_) {
-        (ctx, out, elem) =>
-          ctx.emit(out)(elem)
-          SameState
+  def createLogic(attr: Attributes) = new GraphStageLogic(shape) {
+
+    // Lazily evaluate state
+    val inHandlers = shape.outArray.iterator.map { outlet =>
+      new InHandler {
+        def onPush() = push(outlet, grab(shape.in))
       }
     }
 
-    // Create a special completion handler that advances to the next state when the current downstream completes
-    // FIXME Does this need to handle a non-current downstream finishing?
-    override def initialCompletionHandling =
-      defaultCompletionHandling.copy(onDownstreamFinish = (ctx, _) => {
-        if (states.hasNext) states.next()
-        else { ctx.finish(); SameState }
-      })
+    val outHandler = new OutHandler {
+      def onPull() = pull(shape.in)
+      override def onDownstreamFinish() =
+        if (inHandlers.hasNext) setHandler(shape.in, inHandlers.next())
+        else completeStage()
+    }
 
-    def initialState = states.next()
+    shape.outArray.foreach(setHandler(_, outHandler))
+
+    setHandler(shape.in, inHandlers.next())
 
   }
 

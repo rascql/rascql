@@ -33,7 +33,7 @@ object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders
   implicit val system = ActorSystem("Example")
   val settings = ActorMaterializerSettings(
     system.settings.config.getConfig("rascql.stream.materializer"))
-  implicit val materializer = ActorMaterializer(settings, "Rascql", Optimizations.all)
+  implicit val materializer = ActorMaterializer(settings, "Rascql")
 
   var charset = Charset.forName("UTF-8")
 
@@ -55,7 +55,7 @@ object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders
     )
   ))
 
-  val startup = BidiFlow() { implicit b =>
+  val startup = BidiFlow.fromGraph(FlowGraph.create() { implicit b =>
     val concat = b.add(Concat[FrontendMessage]())
     val rollover = b.add(Rollover[BackendMessage]())
 
@@ -68,13 +68,13 @@ object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders
     )) ~> concat
 
     BidiShape(concat.in(1), concat.out, rollover.in, rollover.out(1))
-  }
+  })
 
   val conn = Tcp().outgoingConnection(host = "localhost", port = 5432)
 
   val stdout =
     Flow[Source[Any, Any]].
-      flatten(FlattenStrategy.concat).
+      flatMapConcat(identity).
       toMat(Sink.fold(0) { (acc, e) => println(e) ; acc + 1 })(Keep.right)
 
   val (_, count) =

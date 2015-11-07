@@ -17,7 +17,7 @@
 package rascql.postgresql.stream
 
 import akka.stream._
-import akka.stream.scaladsl._
+import akka.stream.stage._
 
 /**
  * Partitions elements based on a predicate when demand is available for both
@@ -25,21 +25,24 @@ import akka.stream.scaladsl._
  *
  * @author Philip L. McMahon
  */
-class Partition[T](fn: T => Boolean)
-  extends FlexiRoute[T, PartitionShape[T]](
-    new PartitionShape[T], Attributes.name("Partition")) {
+class Partition[T](predicate: T => Boolean)
+  extends GraphStage[PartitionShape[T]] {
 
-  import FlexiRoute._
+  val shape = new PartitionShape[T]
 
-  override def createRouteLogic(p: PortT) = new RouteLogic[T] {
+  def createLogic(attrs: Attributes) = new GraphStageLogic(shape) {
 
-    def initialState = State[Any](DemandFromAll(p.outlets)) {
-      (ctx, _, elem) =>
-        ctx.emit(if (fn(elem)) p.matched else p.unmatched)(elem)
-        SameState
+    setHandler(shape.in, new InHandler {
+      def onPush() = read(shape.in) { e =>
+        emit(if (predicate(e)) shape.matched else shape.unmatched, e)
+      }
+    })
+
+    val puller = new OutHandler {
+      def onPull() = pull(shape.in)
     }
 
-    override def initialCompletionHandling = eagerClose
+    shape.outlets.foreach(setHandler(_, puller))
 
   }
 
@@ -47,7 +50,7 @@ class Partition[T](fn: T => Boolean)
 
 object Partition {
 
-  def apply[T](fn: T => Boolean): Partition[T] = new Partition(fn)
+  def apply[T](p: T => Boolean): Partition[T] = new Partition(p)
 
 }
 
