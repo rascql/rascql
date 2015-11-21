@@ -24,6 +24,11 @@ import akka.stream.stage._
  * sequentially. As the active downstream finishes, the next [[Outlet]] is
  * activated. When the last [[Outlet]] finishes, the entire stream finishes.
  *
+ * This stage is designed to buffer a single element in case the downstream
+ * outlet is unavailable upon push, but then fails before the in-flight element
+ * is pushed to the outlet. The element will be pushed to the next available
+ * outlet, if any.
+ *
  * If any upstream error occurs, the entire stream fails.
  *
  * @author Philip L. McMahon
@@ -36,23 +41,54 @@ class Rollover[T](outputPorts: Int) extends GraphStage[UniformFanOutShape[T, T]]
 
   def createLogic(attr: Attributes) = new GraphStageLogic(shape) {
 
-    // Lazily evaluate state
-    val inHandlers = shape.outArray.iterator.map { outlet =>
-      new InHandler {
-        def onPush() = push(outlet, grab(shape.in))
+    var buffer = Option.empty[T]
+
+    var active :: queued = shape.outArray.toList
+
+    val ignorePull = new OutHandler {
+      def onPull() = ()
+      override def onDownstreamFinish() = queued = queued.filterNot(isClosed(_))
+    }
+
+    // Only call when active is known to have pending demand
+    def pushAndClearBuffer(elem: T): Unit = {
+      push(active, elem)
+      buffer = None
+    }
+
+    // If no element buffered, relay demand to upstream
+    val relayPull: OutHandler = new OutHandler {
+      def onPull() = buffer.fold(pull(shape.in)) { elem =>
+        push(active, elem)
+        buffer = None
+      }
+      override def onDownstreamFinish() = queued match {
+        case first :: rest =>
+          setHandler(first, relayPull)
+          buffer.foreach { elem =>
+            if (isAvailable(first)) {
+              push(first, elem)
+              buffer = None
+            }
+          }
+          active = first
+          queued = rest
+        case Nil =>
+          completeStage()
       }
     }
 
-    val outHandler = new OutHandler {
-      def onPull() = pull(shape.in)
-      override def onDownstreamFinish() =
-        if (inHandlers.hasNext) setHandler(shape.in, inHandlers.next())
-        else completeStage()
-    }
+    setHandler(shape.in, new InHandler {
+      def onPush() = {
+        val elem = grab(shape.in)
+        if (isAvailable(active)) push(active, elem)
+        else buffer = Some(elem)
+      }
+    })
 
-    shape.outArray.foreach(setHandler(_, outHandler))
+    setHandler(active, relayPull)
 
-    setHandler(shape.in, inHandlers.next())
+    queued.foreach(setHandler(_, ignorePull))
 
   }
 
@@ -60,6 +96,6 @@ class Rollover[T](outputPorts: Int) extends GraphStage[UniformFanOutShape[T, T]]
 
 object Rollover {
 
-  def apply[T](n: Int = 2): Rollover[T] = new Rollover[T](2)
+  def apply[T](n: Int = 2): Rollover[T] = new Rollover[T](n)
 
 }

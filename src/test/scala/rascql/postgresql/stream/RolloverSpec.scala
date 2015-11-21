@@ -51,7 +51,56 @@ class RolloverSpec extends StreamSpec with WordSpecLike {
       sub1.cancel()
       sub2.request(1)
       c2.expectNext(2)
+      sub2.cancel()
+    }
+
+    "skip closed outputs" in {
+      val c1 = TestSubscriber.manualProbe[Int]()
+      val c2 = TestSubscriber.manualProbe[Int]()
+      val c3 = TestSubscriber.manualProbe[Int]()
+
+      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
+        val rollover = b.add(Rollover[Int](3))
+        Source(List(1, 2)) ~> rollover.in
+        rollover ~> Sink(c1)
+        rollover ~> Sink(c2)
+        rollover ~> Sink(c3)
+        ClosedShape
+      }).run()
+
+      val sub1 = c1.expectSubscription()
+      val sub2 = c2.expectSubscription()
+      val sub3 = c3.expectSubscription()
+      sub1.request(1)
+      sub2.cancel() // Cancel before element received
+      c1.expectNext(1)
       sub1.cancel()
+      c3.expectNoMsg() // No demand yet from third subscriber
+      sub3.request(1)
+      c3.expectNext(2)
+      sub3.cancel()
+    }
+
+    "accept demand only from active output" in {
+      val c1 = TestSubscriber.manualProbe[Int]()
+      val c2 = TestSubscriber.manualProbe[Int]()
+
+      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
+        val rollover = b.add(Rollover[Int](2))
+        Source(List(1, 2)) ~> rollover.in
+        rollover ~> Sink(c1)
+        rollover ~> Sink(c2)
+        ClosedShape
+      }).run()
+
+      val sub1 = c1.expectSubscription()
+      val sub2 = c2.expectSubscription()
+      sub2.request(1)
+      c1.expectNoMsg()
+      sub1.request(1)
+      c1.expectNext(1)
+      sub1.cancel()
+      sub2.cancel()
     }
 
   }
