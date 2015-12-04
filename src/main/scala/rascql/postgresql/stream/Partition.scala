@@ -33,13 +33,14 @@ class Partition[T](predicate: T => Boolean)
   def createLogic(attrs: Attributes) = new GraphStageLogic(shape) {
 
     setHandler(shape.in, new InHandler {
-      def onPush() = read(shape.in) { e =>
+      def onPush() = {
+        val e = grab(shape.in)
         emit(if (predicate(e)) shape.matched else shape.unmatched, e)
       }
     })
 
     val puller = new OutHandler {
-      def onPull() = pull(shape.in)
+      def onPull() = if (!hasBeenPulled(shape.in)) pull(shape.in)
     }
 
     shape.outlets.foreach(setHandler(_, puller))
