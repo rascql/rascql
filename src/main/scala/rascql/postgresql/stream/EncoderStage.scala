@@ -17,6 +17,7 @@
 package rascql.postgresql.stream
 
 import java.nio.charset.Charset
+import akka.stream._
 import akka.stream.stage._
 import akka.util.ByteString
 import rascql.postgresql.protocol.{FrontendMessage, StartupMessage}
@@ -28,33 +29,41 @@ import rascql.postgresql.protocol.{FrontendMessage, StartupMessage}
  * @author Philip L. McMahon
  */
 private[stream] class EncoderStage(charset: Charset)
-  extends StatefulStage[FrontendMessage, ByteString] {
+  extends GraphStage[FlowShape[FrontendMessage, ByteString]] {
 
   private val `client_encoding` = "client_encoding" -> charset.displayName()
 
-  def starting = new State {
+  val in: Inlet[FrontendMessage] = Inlet("encoder.in")
 
-    def onPush(msg: FrontendMessage, ctx: Context[ByteString]) =
-      msg match {
+  val out: Outlet[ByteString] = Outlet("encoder.out")
+
+  val shape = FlowShape(in, out)
+
+  def createLogic(attr: Attributes) = new GraphStageLogic(shape) {
+
+    val starting: InHandler = new InHandler {
+      def onPush() = grab(in) match {
         case StartupMessage(user, params) =>
-          become(started(charset))
-          // Replace existing client encoding value, if any, with UTF8.
+          // Replace existing client encoding value, if any, with .
           // When the encoding is not specified, the database default value
           // will be used.
-          ctx.push(StartupMessage(user, params + `client_encoding`).encode(charset))
-        case _ =>
-          ctx.fail(UnexpectedFrontendMessage(msg))
+          push(out, StartupMessage(user, params + `client_encoding`).encode(charset))
+          setHandler(in, started)
+        case msg =>
+          failStage(UnexpectedFrontendMessage(msg))
       }
+    }
+
+    val started: InHandler = new InHandler {
+      def onPush() = push(out, grab(in).encode(charset))
+    }
+
+    setHandler(in, starting)
+
+    setHandler(out, new OutHandler {
+      def onPull() = pull(in)
+    })
 
   }
-
-  def started(charset: Charset) = new State {
-
-    def onPush(msg: FrontendMessage, ctx: Context[ByteString]) =
-      ctx.push(msg.encode(charset))
-
-  }
-
-  def initial = starting
 
 }
