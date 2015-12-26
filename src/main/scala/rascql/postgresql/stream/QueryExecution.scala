@@ -64,10 +64,10 @@ import rascql.postgresql.protocol._
  */
 object QueryExecution {
 
-  import FlowGraph.Implicits._
+  import GraphDSL.Implicits._
 
   def apply(): BidiFlow[SendQuery, FrontendMessage, BackendMessage, Source[QueryResult, Unit], Unit] =
-    BidiFlow.fromGraph(FlowGraph.create() { implicit b =>
+    BidiFlow.fromGraph(GraphDSL.create() { implicit b =>
 
       // Don't allow executing the next statement unless we've seen the prior statement complete
       // Match statement with a token to before processing the statement
@@ -91,21 +91,21 @@ object QueryExecution {
         splitWhen {
           case Vector(_: ReadyForQuery, msg) => true
           case _ => false
+        }.collect {
+          case _ :+ msg => msg // Only publish "current" message
+          case Vector(msg) => msg // The first message, will only match once
         }.
-        map {
-          _.collect {
-            case _ :+ msg => msg // Only publish "current" message
-            case Vector(msg) => msg // The first message, will only match once
-          }.
-          transform(() => new QueryResultStage)
-        })
+        transform(() => new QueryResultStage).
+        prefixAndTail(0). // Convert SubFlow to Source
+        map(_._2).
+        concatSubstreams)
 
       broadcast ~> results
       broadcast ~> tokens ~> zip.in0
                              zip.out ~> queries ~> concat
                              terminate          ~> concat
 
-      BidiShape(zip.in1, concat.out, broadcast.in, results.outlet)
+      BidiShape(zip.in1, concat.out, broadcast.in, results.out)
     } named("QueryExecution"))
 
 }

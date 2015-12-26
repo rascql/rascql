@@ -30,17 +30,17 @@ class RolloverSpec extends StreamSpec with WordSpecLike {
 
   "A rollover" must {
 
-    import FlowGraph.Implicits._
+    import GraphDSL.Implicits._
 
     "switch to next input on active upstream finish" in {
       val c1 = TestSubscriber.manualProbe[Int]()
       val c2 = TestSubscriber.manualProbe[Int]()
 
-      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
+      RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
         val rollover = b.add(Rollover[Int](2))
         Source(List(1, 2)) ~> rollover.in
-        rollover ~> Sink(c1)
-        rollover ~> Sink(c2)
+        rollover ~> Sink.fromSubscriber(c1)
+        rollover ~> Sink.fromSubscriber(c2)
         ClosedShape
       }).run()
 
@@ -59,12 +59,12 @@ class RolloverSpec extends StreamSpec with WordSpecLike {
       val c2 = TestSubscriber.manualProbe[Int]()
       val c3 = TestSubscriber.manualProbe[Int]()
 
-      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
+      RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
         val rollover = b.add(Rollover[Int](3))
         Source(List(1, 2)) ~> rollover.in
-        rollover ~> Sink(c1)
-        rollover ~> Sink(c2)
-        rollover ~> Sink(c3)
+        rollover ~> Sink.fromSubscriber(c1)
+        rollover ~> Sink.fromSubscriber(c2)
+        rollover ~> Sink.fromSubscriber(c3)
         ClosedShape
       }).run()
 
@@ -85,11 +85,11 @@ class RolloverSpec extends StreamSpec with WordSpecLike {
       val c1 = TestSubscriber.manualProbe[Int]()
       val c2 = TestSubscriber.manualProbe[Int]()
 
-      RunnableGraph.fromGraph(FlowGraph.create() { implicit b =>
+      RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
         val rollover = b.add(Rollover[Int](2))
         Source(List(1, 2)) ~> rollover.in
-        rollover ~> Sink(c1)
-        rollover ~> Sink(c2)
+        rollover ~> Sink.fromSubscriber(c1)
+        rollover ~> Sink.fromSubscriber(c2)
         ClosedShape
       }).run()
 

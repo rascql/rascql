@@ -19,6 +19,8 @@ package rascql.postgresql.stream
 import akka.stream._
 import akka.stream.stage._
 
+import scala.annotation.unchecked.uncheckedVariance
+
 /**
  * Partitions elements based on a predicate when demand is available for both
  * [[Outlet]]s.
@@ -60,8 +62,8 @@ import FanOutShape._
 class PartitionShape[T] private[stream] (_init: Init[T] = Name[T]("Partition"))
   extends FanOutShape[T](_init) {
 
-  val matched = newOutlet[T]("matched")
-  val unmatched = newOutlet[T]("unmatched")
+  val matched = newOutlet[T @uncheckedVariance]("matched")
+  val unmatched = newOutlet[T @uncheckedVariance]("unmatched")
 
   protected override def construct(i: Init[T]) = new PartitionShape[T](i)
 

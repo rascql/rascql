@@ -40,7 +40,7 @@ object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders
   val Array(username, password) = args
 
   import system.dispatcher
-  import FlowGraph.Implicits._
+  import GraphDSL.Implicits._
 
   val queries = Source(List(
     SendQuery(
@@ -55,7 +55,7 @@ object Demo extends App with DefaultParameterEncoders with DefaultColumnDecoders
     )
   ))
 
-  val startup = BidiFlow.fromGraph(FlowGraph.create() { implicit b =>
+  val startup = BidiFlow.fromGraph(GraphDSL.create() { implicit b =>
     val concat = b.add(Concat[FrontendMessage]())
     val rollover = b.add(Rollover[BackendMessage]())
 

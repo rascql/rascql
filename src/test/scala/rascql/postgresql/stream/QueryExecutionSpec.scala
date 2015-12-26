@@ -36,7 +36,9 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
     val src = TestPublisher.manualProbe[In]()
     val sink = TestSubscriber.manualProbe[Out]()
 
-    Source(src).via(flow).runWith(Sink(sink))
+    Source.fromPublisher(src).
+      via(flow).
+      runWith(Sink.fromSubscriber(sink))
 
     fn(src, sink)
   }
@@ -47,7 +49,8 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
     val rsrc = TestPublisher.manualProbe[I2]()
     val lsink = TestSubscriber.manualProbe[O2]()
 
-    bidi.join(Flow.fromSinkAndSourceMat(Sink(rsink), Source(rsrc))(Keep.none)).runWith(Source(lsrc), Sink(lsink))
+    bidi.join(Flow.fromSinkAndSourceMat(Sink.fromSubscriber(rsink), Source.fromPublisher(rsrc))(Keep.none)).
+      runWith(Source.fromPublisher(lsrc), Sink.fromSubscriber(lsink))
 
     fn(lsrc, rsink, rsrc, lsink)
   }
@@ -136,7 +139,7 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
         femsgs.expectNext(Query("BEGIN; SELECT $i; COMMIT"))
         bepub.sendNext(CommandComplete(NameOnly("BEGIN")))
         val sink = TestSubscriber.probe[QueryResult]()
-        results.expectNext().runWith(Sink(sink))
+        results.expectNext().runWith(Sink.fromSubscriber(sink))
         sink.expectSubscription().request(Int.MaxValue)
         sink.expectNext(QueryComplete(NameOnly("BEGIN")))
         bepub.sendNext(emptyDesc)
@@ -176,7 +179,7 @@ class QueryExecutionSpec extends StreamSpec with MustMatchers {
       bepub.sendComplete()
       val source = results.expectNext()
       val sink = TestSubscriber.probe[QueryResult]()
-      source.runWith(Sink(sink))
+      source.runWith(Sink.fromSubscriber(sink))
       sink.expectSubscription().request(2) // Get QRS and complete message
       val QueryRowSet(_, _, rows) = sink.expectNext()
       rows must have size(1)

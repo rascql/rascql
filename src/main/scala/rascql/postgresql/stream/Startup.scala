@@ -47,21 +47,11 @@ import rascql.postgresql.protocol._
  */
 object Startup {
 
-  import FlowGraph.Implicits._
-
   type Parameters = immutable.Map[String, String]
 
   def apply(username: String, password: String, parameters: Parameters): Flow[BackendMessage, FrontendMessage, Unit] =
-    Flow.fromGraph(FlowGraph.create() { implicit b =>
-
-      val initial = b.add(Source.single[FrontendMessage](StartupMessage(username, parameters)))
-      val authn = b.add(Flow[BackendMessage].transform(() => new AuthenticationStage(username, password)))
-      val concat = b.add(Concat[FrontendMessage]())
-
-      initial ~> concat
-        authn ~> concat
-
-      FlowShape(authn.inlet, concat.out)
-    } named("Startup"))
+    Flow[BackendMessage].transform(() => new AuthenticationStage(username, password)).
+      prepend(Source.single[FrontendMessage](StartupMessage(username, parameters))).
+      named("Startup")
 
 }

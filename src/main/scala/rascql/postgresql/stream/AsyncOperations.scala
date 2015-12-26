@@ -51,16 +51,16 @@ import rascql.postgresql.protocol._
  */
 object AsyncOperations {
 
-  import FlowGraph.Implicits._
+  import GraphDSL.Implicits._
 
   def apply[Mat](sink: Sink[AsyncOperation, Mat]): BidiFlow[FrontendMessage, FrontendMessage, BackendMessage, BackendMessage, Mat] =
-    BidiFlow.fromGraph(FlowGraph.create(sink) { implicit b => ops =>
+    BidiFlow.fromGraph(GraphDSL.create(sink) { implicit b => ops =>
       val identity = b.add(Flow[FrontendMessage])
       val partition = b.add(Partition[BackendMessage](_.isInstanceOf[AsyncOperation]))
 
       partition.matched.map(_.asInstanceOf[AsyncOperation]) ~> ops
 
-      BidiShape(identity.inlet, identity.outlet, partition.in, partition.unmatched)
+      BidiShape(identity.in, identity.outlet, partition.in, partition.unmatched)
     } named("AsyncOperations"))
 
 }

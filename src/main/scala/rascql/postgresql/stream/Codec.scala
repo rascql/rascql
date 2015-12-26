@@ -20,7 +20,6 @@ import java.nio.charset.Charset
 
 import akka.stream._
 import akka.stream.scaladsl._
-import akka.stream.stage._
 import akka.util.ByteString
 import rascql.postgresql.protocol._
 
@@ -51,12 +50,12 @@ object Codec {
 
   def apply(charset: Charset): BidiFlow[FrontendMessage, ByteString, ByteString, BackendMessage, Unit] =
     // TODO Support changing encoding based on ParameterStatus message?
-    BidiFlow.fromGraph(FlowGraph.create() { b =>
+    BidiFlow.fromGraph(GraphDSL.create() { b =>
 
       val encoder = b.add(new EncoderStage(charset))
       val decoder = b.add(Flow[ByteString].transform(() => new DecoderStage(charset)))
 
-      BidiShape(encoder.inlet, encoder.outlet, decoder.inlet, decoder.outlet)
+      BidiShape(encoder.in, encoder.out, decoder.in, decoder.out)
     } named("Codec"))
 
 }
